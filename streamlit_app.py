@@ -193,3 +193,5 @@ with col3:
 
             st.session_state.index += 1
             st.rerun()
+st.write("▼選択中のフォルダ名:", repr(selected_folder))
+st.write("▼画像リストにあるフォルダ一覧:", image_list_df["フォルダ"].unique().tolist())
