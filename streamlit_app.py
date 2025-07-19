@@ -120,9 +120,17 @@ parent_folder_name = "mix"
 
 # ====== 回答・スキップ済みの重複除外 ======
 user_df = combined_df[combined_df["回答者"] == username].copy()
-skip_pairs = set(zip(skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+
+# skip_dfに必要な列がある場合だけ処理する
+if "選択フォルダ" in skip_df.columns and "画像ファイル名" in skip_df.columns:
+    skip_pairs = set(zip(skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+else:
+    skip_pairs = set()
+
+# combined_dfには常にある前提（なければ同様にチェック追加が必要）
 answered_pairs = set(zip(user_df["選択フォルダ"], user_df["画像ファイル名"]))
 all_done = answered_pairs.union(skip_pairs)
+
 
 # ====== セッション初期化 ======
 if "image_files" not in st.session_state:
