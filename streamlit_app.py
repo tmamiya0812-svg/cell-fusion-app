@@ -6,7 +6,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # ====== Google Sheets 設定 ======
-SHEET_ID = "1yQuifGNG8e77ka5HlJariXxgqPffrIviDZKgmS9FGCg"
+SHEET_ID = "1KUxQDhhnYS6tj4pFYAHwq9SzWxx3iDotTGXSzFUTU-s"
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
 gc = gspread.authorize(credentials)
