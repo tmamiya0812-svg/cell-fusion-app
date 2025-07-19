@@ -19,15 +19,20 @@ log_sheet = gc.open_by_key(LOG_SHEET_ID)
 required_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "①未融合", "②接触", "③融合中", "④完全融合"]
 skip_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "スキップ理由"]
 
-# ====== データの読み込み関数 ======
-# 汎用的な関数に分ける
+
 def sheet_to_df_from(sheet_obj, ws_name, cols):
     try:
         ws = sheet_obj.worksheet(ws_name)
         return pd.DataFrame(ws.get_all_records())
-    except:
+    except gspread.exceptions.WorksheetNotFound:
+        # シートがなければ新規作成（1行目にヘッダー）
+        sheet_obj.add_worksheet(title=ws_name, rows="1000", cols=str(len(cols)))
+        ws = sheet_obj.worksheet(ws_name)
+        ws.append_row(cols)  # ヘッダーとして列名を追加
         return pd.DataFrame(columns=cols)
-
+    except Exception as e:
+        st.error(f"{ws_name} の読み込みエラー: {e}")
+        return pd.DataFrame(columns=cols)
 def df_to_sheet_to(sheet_obj, df, ws_name):
     ws = sheet_obj.worksheet(ws_name)
     ws.clear()
