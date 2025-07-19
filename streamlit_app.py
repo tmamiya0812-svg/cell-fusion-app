@@ -73,6 +73,8 @@ folder_images = image_list_df[image_list_df["フォルダ"] == selected_folder]
 
 st.write("▼選択中のフォルダ名:", repr(selected_folder))
 st.write("▼画像リストにあるフォルダ一覧:", image_list_df["フォルダ"].unique().tolist())
+st.write("📋 image_list_df:", image_list_df)
+
 
 if folder_images.empty:
     st.error("このフォルダには画像がありません")
