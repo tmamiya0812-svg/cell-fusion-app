@@ -6,29 +6,34 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # ====== Google Sheets 設定 ======
-SHEET_ID = "1KUxQDhhnYS6tj4pFYAHwq9SzWxx3iDotTGXSzFUTU-s"
+IMAGE_SHEET_ID = "1KUxQDhhnYS6tj4pFYAHwq9SzWxx3iDotTGXSzFUTU-s"
+LOG_SHEET_ID = "1yQuifGNG8e77ka5HlJariXxgqPffrIviDZKgmS9FGCg"
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
 gc = gspread.authorize(credentials)
-sheet = gc.open_by_key(SHEET_ID)
+image_sheet = gc.open_by_key(IMAGE_SHEET_ID)
+log_sheet = gc.open_by_key(LOG_SHEET_ID)
+
 
 # ====== 必須列の定義 ======
 required_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "①未融合", "②接触", "③融合中", "④完全融合"]
 skip_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "スキップ理由"]
 
 # ====== データの読み込み関数 ======
-def sheet_to_df(ws_name, cols):
+# 汎用的な関数に分ける
+def sheet_to_df_from(sheet_obj, ws_name, cols):
     try:
-        ws = sheet.worksheet(ws_name)
+        ws = sheet_obj.worksheet(ws_name)
         return pd.DataFrame(ws.get_all_records())
     except:
         return pd.DataFrame(columns=cols)
 
-def df_to_sheet(df, ws_name):
-    ws = sheet.worksheet(ws_name)
+def df_to_sheet_to(sheet_obj, df, ws_name):
+    ws = sheet_obj.worksheet(ws_name)
     ws.clear()
     if not df.empty:
         ws.update([df.columns.tolist()] + df.values.tolist())
+
 
 # ====== ログイン認証 ======
 USER_CREDENTIALS = {
@@ -59,16 +64,43 @@ if not st.session_state.authenticated:
 
 # ====== 評価データの取得 ======
 username = st.session_state.username
-combined_df = sheet_to_df("今回の評価", required_cols)
+st.sidebar.markdown(f"**ログイン中:** `{username}`")
+combined_df = sheet_to_df_from(log_sheet, "今回の評価", required_cols)
 existing_df = combined_df.copy()
-skip_df = sheet_to_df("スキップログ", skip_cols)
+skip_df = sheet_to_df_from(log_sheet, "スキップログ", skip_cols)
 if "選択フォルダ" in skip_df.columns:
     skip_df = skip_df[~skip_df["選択フォルダ"].str.contains("_SKIPPED_IMAGES", na=False)]
 
-image_list_df = sheet_to_df("画像リスト", ["フォルダ", "画像ファイル名", "画像URL"])
+image_list_df = sheet_to_df_from(image_sheet, "画像リスト", ["フォルダ", "画像ファイル名", "画像URL"])
 folder_names = sorted(image_list_df["フォルダ"].unique().tolist())
+# 評価済みフォルダ一覧
+done_folders = set(combined_df["選択フォルダ"].unique().tolist()) | set(skip_df["選択フォルダ"].unique().tolist())
 
-selected_folder = st.sidebar.selectbox("評価するフォルダを選んでください", folder_names)
+# 未評価フォルダのみに絞る
+remaining_folders = [f for f in folder_names if f not in done_folders]
+
+if not remaining_folders:
+    st.success("すべてのフォルダを評価しました！")
+    st.stop()
+
+selected_folder = random.choice(remaining_folders)
+
+if st.sidebar.button("途中保存"):
+    if "buffered_entries" in st.session_state and st.session_state.buffered_entries:
+        buffered_df = pd.DataFrame(st.session_state.buffered_entries)
+        combined_df = pd.concat([existing_df, buffered_df], ignore_index=True)
+        combined_df.drop_duplicates(subset=["回答者", "選択フォルダ", "画像ファイル名"], keep="last", inplace=True)
+
+        summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
+        summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
+
+        df_to_sheet_to(log_sheet, combined_df, "今回の評価")
+        df_to_sheet_to(log_sheet, summary, "分類別件数")
+        df_to_sheet_to(log_sheet, skip_df, "スキップログ")
+
+        st.session_state.buffered_entries = []
+        st.sidebar.success("一時保存しました")
+
 folder_images = image_list_df[image_list_df["フォルダ"] == selected_folder]
 
 
@@ -102,9 +134,10 @@ if st.session_state.index >= len(st.session_state.image_files):
             summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
             summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
 
-            df_to_sheet(combined_df, "今回の評価")
-            df_to_sheet(summary, "分類別件数")
-            df_to_sheet(skip_df, "スキップログ")
+            df_to_sheet_to(log_sheet, combined_df, "今回の評価")
+            df_to_sheet_to(log_sheet, summary, "分類別件数")
+            df_to_sheet_to(log_sheet, skip_df, "スキップログ")
+
 
         st.success("保存して終了しました。アプリを閉じてください。")
     st.stop()
@@ -186,9 +219,10 @@ with col3:
                 summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
                 summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
 
-                df_to_sheet(combined_df, "今回の評価")
-                df_to_sheet(summary, "分類別件数")
-                df_to_sheet(skip_df, "スキップログ")
+                df_to_sheet_to(log_sheet, combined_df, "今回の評価")
+                df_to_sheet_to(log_sheet, summary, "分類別件数")
+                df_to_sheet_to(log_sheet, skip_df, "スキップログ")
+
 
                 existing_df = combined_df.copy()
                 st.session_state.buffered_entries = []
