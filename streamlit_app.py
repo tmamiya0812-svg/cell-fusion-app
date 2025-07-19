@@ -32,7 +32,7 @@ def df_to_sheet(df, ws_name):
 
 # ====== ログイン認証 ======
 USER_CREDENTIALS = {
-    "mamiya": "protoplast",
+    "mamiya": "a",
     "arai": "a",
     "yamazaki": "protoplast"
 }
