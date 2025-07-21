@@ -21,18 +21,19 @@ skip_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "�
 
 
 
-def sheet_to_df_from(sheet_obj, ws_name, cols):
+@st.cache_data(ttl=60)
+def load_ws_data(sheet_id: str, ws_name: str, header_cols: list) -> pd.DataFrame:
+    gc = gspread.authorize(credentials)
+    sheet = gc.open_by_key(sheet_id)
     try:
-        ws = sheet_obj.worksheet(ws_name)
+        ws = sheet.worksheet(ws_name)
         return pd.DataFrame(ws.get_all_records())
     except gspread.exceptions.WorksheetNotFound:
-        sheet_obj.add_worksheet(title=ws_name, rows="1000", cols=str(len(cols)))
-        ws = sheet_obj.worksheet(ws_name)
-        ws.append_row(cols)
-        return pd.DataFrame(columns=cols)
-    except Exception as e:
-        st.error(f"{ws_name} の読み込みエラー: {e}")
-        return pd.DataFrame(columns=cols)
+        sheet.add_worksheet(title=ws_name, rows="1000", cols=str(len(header_cols)))
+        ws = sheet.worksheet(ws_name)
+        ws.append_row(header_cols)
+        return pd.DataFrame(columns=header_cols)
+
 def df_to_sheet_to(sheet_obj, df, ws_name):
     ws = sheet_obj.worksheet(ws_name)
     ws.clear()
@@ -70,13 +71,13 @@ if not st.session_state.authenticated:
 # ====== 評価データの取得 ======
 username = st.session_state.username
 st.sidebar.markdown(f"**ログイン中:** `{username}`")
-combined_df = sheet_to_df_from(log_sheet, "今回の評価", required_cols)
+combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
 existing_df = combined_df.copy()
-skip_df = sheet_to_df_from(log_sheet, "スキップログ", skip_cols)
+skip_df = load_ws_data(LOG_SHEET_ID, "スキップログ", skip_cols)
 if "選択フォルダ" in skip_df.columns:
     skip_df = skip_df[~skip_df["選択フォルダ"].str.contains("_SKIPPED_IMAGES", na=False)]
+image_list_df = load_ws_data(IMAGE_SHEET_ID, "画像リスト", ["フォルダ", "画像ファイル名", "画像URL"])
 
-image_list_df = sheet_to_df_from(image_sheet, "画像リスト", ["フォルダ", "画像ファイル名", "画像URL"])
 
 
 folder_names = sorted(image_list_df["フォルダ"].unique().tolist())
