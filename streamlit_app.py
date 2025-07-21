@@ -115,13 +115,6 @@ if st.sidebar.button("途中保存"):
         summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
         summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
 
-        # 評価保存前
-        st.sidebar.markdown("💾 保存直前のcombined_df 件数: " + str(len(combined_df)))
-        st.sidebar.markdown("🔍 現在の combined_df 件数: " + str(len(combined_df)))
-        st.sidebar.markdown("📄 最新の combined_df の一部:")
-        st.sidebar.dataframe(combined_df.tail(5))
-
-        
         df_to_sheet_to(log_sheet, combined_df, "今回の評価")
         df_to_sheet_to(log_sheet, summary, "分類別件数")
         df_to_sheet_to(log_sheet, skip_df, "スキップログ")
@@ -141,10 +134,6 @@ parent_folder_name = "mix"
 
 # ====== 回答・スキップ済みの重複除外 ======
 user_df = combined_df[combined_df["回答者"] == username].copy()
-
-st.sidebar.markdown(f"👤 フィルタ後 user_df 件数: {len(user_df)}")
-st.sidebar.markdown(f"🧪 現在の username: `{username}`")
-
 
 # skip_dfに必要な列がある場合だけ処理する
 if "選択フォルダ" in skip_df.columns and "画像ファイル名" in skip_df.columns:
@@ -181,14 +170,12 @@ if st.session_state.index >= len(st.session_state.image_files):
         df_to_sheet_to(log_sheet, skip_df, "スキップログ")
 
         existing_df = combined_df.copy()
-        
-        st.sidebar.markdown(f"📥 読み込み直後の existing_df 件数: {len(existing_df)}")
-
         st.session_state.buffered_entries = []
         st.sidebar.success("保存しました（フォルダ終了時）")
 
     # --- 次のフォルダを選ぶ ---
-    answered_pairs = set(zip(combined_df["選択フォルダ"], combined_df["画像ファイル名"]))
+    user_df = combined_df[combined_df["回答者"] == username].copy()
+    answered_pairs = set(zip(user_df["選択フォルダ"], user_df["画像ファイル名"]))
     if "選択フォルダ" in skip_df.columns and "画像ファイル名" in skip_df.columns:
         skipped_pairs = set(zip(skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
     else:
