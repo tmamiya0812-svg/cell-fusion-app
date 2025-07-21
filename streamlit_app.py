@@ -119,6 +119,8 @@ if st.sidebar.button("途中保存"):
         df_to_sheet_to(log_sheet, summary, "分類別件数")
         df_to_sheet_to(log_sheet, skip_df, "スキップログ")
 
+        existing_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
+
         st.session_state.buffered_entries = []
         st.sidebar.success("一時保存しました")
 
@@ -169,7 +171,8 @@ if st.session_state.index >= len(st.session_state.image_files):
         df_to_sheet_to(log_sheet, summary, "分類別件数")
         df_to_sheet_to(log_sheet, skip_df, "スキップログ")
 
-        existing_df = combined_df.copy()
+        existing_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
+
         st.session_state.buffered_entries = []
         st.sidebar.success("保存しました（フォルダ終了時）")
 
@@ -286,7 +289,8 @@ with col3:
                 df_to_sheet_to(log_sheet, skip_df, "スキップログ")
 
 
-                existing_df = combined_df.copy()
+                existing_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
+
                 st.session_state.buffered_entries = []
 
             st.session_state.index += 1
