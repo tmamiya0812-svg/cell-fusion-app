@@ -148,8 +148,9 @@ all_done = answered_pairs.union(skip_pairs)
 
 # ====== セッション初期化 ======
 if "image_files" not in st.session_state:
-    all_files = folder_images[~folder_images["画像ファイル名"].isin([f for f1, f in all_done if f1 == selected_folder])]
-    st.session_state.image_files = all_files.reset_index(drop=True)
+    folder_images["pair"] = list(zip(folder_images["フォルダ"], folder_images["画像ファイル名"]))
+    filtered_images = folder_images[~folder_images["pair"].isin(all_done)].drop(columns=["pair"])
+    st.session_state.image_files = filtered_images.reset_index(drop=True)
     st.session_state.index = 0
 
 if st.session_state.index >= len(st.session_state.image_files):
@@ -196,8 +197,9 @@ if st.session_state.index >= len(st.session_state.image_files):
     selected_folder = random.choice(remaining_folders)
     folder_images = image_list_df[image_list_df["フォルダ"] == selected_folder]
     all_done = answered_pairs.union(skipped_pairs)
-    all_files = folder_images[~folder_images["画像ファイル名"].isin([f for f1, f in all_done if f1 == selected_folder])]
-    st.session_state.image_files = all_files.reset_index(drop=True)
+    folder_images["pair"] = list(zip(folder_images["フォルダ"], folder_images["画像ファイル名"]))
+    filtered_images = folder_images[~folder_images["pair"].isin(all_done)].drop(columns=["pair"])
+    st.session_state.image_files = filtered_images.reset_index(drop=True)
     st.session_state.index = 0
     st.rerun()
 
