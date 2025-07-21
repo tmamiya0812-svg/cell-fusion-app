@@ -20,7 +20,7 @@ required_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ",
 skip_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "スキップ理由"]
 
 
-@st.cache_data(ttl=60)  # キャッシュを60秒保持
+
 def sheet_to_df_from(sheet_obj, ws_name, cols):
     try:
         ws = sheet_obj.worksheet(ws_name)
