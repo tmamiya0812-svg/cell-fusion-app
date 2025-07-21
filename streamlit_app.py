@@ -25,14 +25,23 @@ skip_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "�
 def load_ws_data(sheet_id: str, ws_name: str, header_cols: list) -> pd.DataFrame:
     gc = gspread.authorize(credentials)
     sheet = gc.open_by_key(sheet_id)
+
     try:
         ws = sheet.worksheet(ws_name)
-        return pd.DataFrame(ws.get_all_records())
     except gspread.exceptions.WorksheetNotFound:
-        sheet.add_worksheet(title=ws_name, rows="1000", cols=str(len(header_cols)))
-        ws = sheet.worksheet(ws_name)
+        ws = sheet.add_worksheet(title=ws_name, rows="1000", cols=str(len(header_cols)))
         ws.append_row(header_cols)
         return pd.DataFrame(columns=header_cols)
+
+    # ヘッダーが存在しない場合の補完（空シート対策）
+    records = ws.get_all_records()
+    if not records:
+        ws.clear()
+        ws.append_row(header_cols)
+        return pd.DataFrame(columns=header_cols)
+
+    return pd.DataFrame(records)
+
 
 def df_to_sheet_to(sheet_obj, df, ws_name):
     ws = sheet_obj.worksheet(ws_name)
