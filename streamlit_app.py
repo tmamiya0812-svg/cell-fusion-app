@@ -78,18 +78,23 @@ if "選択フォルダ" in skip_df.columns:
 
 image_list_df = sheet_to_df_from(image_sheet, "画像リスト", ["フォルダ", "画像ファイル名", "画像URL"])
 folder_names = sorted(image_list_df["フォルダ"].unique().tolist())
-# === フォルダごとの評価・スキップ画像数をチェックしてdone_foldersを定義 ===
-done_folders = set()
-for folder in folder_names:
-    folder_images = image_list_df[image_list_df["フォルダ"] == folder]["画像ファイル名"].tolist()
-    evaluated_images = combined_df[combined_df["選択フォルダ"] == folder]["画像ファイル名"].tolist()
-    skipped_images = skip_df[skip_df["選択フォルダ"] == folder]["画像ファイル名"].tolist()
-    all_done = set(evaluated_images + skipped_images)
-    if set(folder_images).issubset(all_done):
-        done_folders.add(folder)
 
-# 未評価フォルダのみに絞る
-remaining_folders = [f for f in folder_names if f not in done_folders]
+# === 評価済み・スキップ済み画像の組み合わせ取得 ===
+answered_pairs = set(zip(combined_df["選択フォルダ"], combined_df["画像ファイル名"]))
+if "選択フォルダ" in skip_df.columns and "画像ファイル名" in skip_df.columns:
+    skipped_pairs = set(zip(skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+else:
+    skipped_pairs = set()
+done_pairs = answered_pairs.union(skipped_pairs)
+
+# === フォルダごとの未評価画像が存在するか判定して、完了フォルダを除外 ===
+remaining_folders = []
+for folder in folder_names:
+    folder_df = image_list_df[image_list_df["フォルダ"] == folder]
+    all_images = set(zip(folder_df["フォルダ"], folder_df["画像ファイル名"]))
+    if not all_images.issubset(done_pairs):
+        remaining_folders.append(folder)
+
 
 if not remaining_folders:
     st.success("すべてのフォルダを評価しました！")
