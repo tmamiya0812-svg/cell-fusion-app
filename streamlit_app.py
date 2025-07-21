@@ -77,6 +77,12 @@ if "選択フォルダ" in skip_df.columns:
     skip_df = skip_df[~skip_df["選択フォルダ"].str.contains("_SKIPPED_IMAGES", na=False)]
 
 image_list_df = sheet_to_df_from(image_sheet, "画像リスト", ["フォルダ", "画像ファイル名", "画像URL"])
+
+
+st.write("✅ 画像リストの件数:", len(image_list_df))
+st.write(image_list_df["フォルダ"].value_counts())
+
+
 folder_names = sorted(image_list_df["フォルダ"].unique().tolist())
 
 # === 評価済み・スキップ済み画像の組み合わせ取得 ===
@@ -87,6 +93,11 @@ else:
     skipped_pairs = set()
 done_pairs = answered_pairs.union(skipped_pairs)
 
+st.write("✅ 評価済み画像の件数:", len(answered_pairs))
+st.write("✅ スキップ済み画像の件数:", len(skipped_pairs))
+st.write("✅ 合計で完了とみなされる画像ペア:", len(done_pairs))
+
+
 # === フォルダごとの未評価画像が存在するか判定して、完了フォルダを除外 ===
 remaining_folders = []
 for folder in folder_names:
@@ -94,6 +105,9 @@ for folder in folder_names:
     all_images = set(zip(folder_df["フォルダ"], folder_df["画像ファイル名"]))
     if not all_images.issubset(done_pairs):
         remaining_folders.append(folder)
+
+st.write("✅ 残りの未評価フォルダ:", remaining_folders)
+
 
 
 if not remaining_folders:
