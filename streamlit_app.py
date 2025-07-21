@@ -79,10 +79,6 @@ if "選択フォルダ" in skip_df.columns:
 image_list_df = sheet_to_df_from(image_sheet, "画像リスト", ["フォルダ", "画像ファイル名", "画像URL"])
 
 
-st.write("✅ 画像リストの件数:", len(image_list_df))
-st.write(image_list_df["フォルダ"].value_counts())
-
-
 folder_names = sorted(image_list_df["フォルダ"].unique().tolist())
 
 # === 評価済み・スキップ済み画像の組み合わせ取得 ===
@@ -93,10 +89,6 @@ else:
     skipped_pairs = set()
 done_pairs = answered_pairs.union(skipped_pairs)
 
-st.write("✅ 評価済み画像の件数:", len(answered_pairs))
-st.write("✅ スキップ済み画像の件数:", len(skipped_pairs))
-st.write("✅ 合計で完了とみなされる画像ペア:", len(done_pairs))
-
 
 # === フォルダごとの未評価画像が存在するか判定して、完了フォルダを除外 ===
 remaining_folders = []
@@ -105,9 +97,6 @@ for folder in folder_names:
     all_images = set(zip(folder_df["フォルダ"], folder_df["画像ファイル名"]))
     if not all_images.issubset(done_pairs):
         remaining_folders.append(folder)
-
-st.write("✅ 残りの未評価フォルダ:", remaining_folders)
-
 
 
 if not remaining_folders:
@@ -164,22 +153,51 @@ if "image_files" not in st.session_state:
 
 if st.session_state.index >= len(st.session_state.image_files):
     st.success("このフォルダのすべての画像を評価しました")
-    if st.button("終了"):
-        if "buffered_entries" in st.session_state and st.session_state.buffered_entries:
-            buffered_df = pd.DataFrame(st.session_state.buffered_entries)
-            combined_df = pd.concat([existing_df, buffered_df], ignore_index=True)
-            combined_df.drop_duplicates(subset=["回答者", "選択フォルダ", "画像ファイル名"], keep="last", inplace=True)
 
-            summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
-            summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
+    # 評価結果を保存
+    if "buffered_entries" in st.session_state and st.session_state.buffered_entries:
+        buffered_df = pd.DataFrame(st.session_state.buffered_entries)
+        combined_df = pd.concat([existing_df, buffered_df], ignore_index=True)
+        combined_df.drop_duplicates(subset=["回答者", "選択フォルダ", "画像ファイル名"], keep="last", inplace=True)
 
-            df_to_sheet_to(log_sheet, combined_df, "今回の評価")
-            df_to_sheet_to(log_sheet, summary, "分類別件数")
-            df_to_sheet_to(log_sheet, skip_df, "スキップログ")
+        summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
+        summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
 
+        df_to_sheet_to(log_sheet, combined_df, "今回の評価")
+        df_to_sheet_to(log_sheet, summary, "分類別件数")
+        df_to_sheet_to(log_sheet, skip_df, "スキップログ")
 
-        st.success("保存して終了しました。アプリを閉じてください。")
-    st.stop()
+        existing_df = combined_df.copy()
+        st.session_state.buffered_entries = []
+
+    # --- 次のフォルダを選ぶ ---
+    answered_pairs = set(zip(combined_df["選択フォルダ"], combined_df["画像ファイル名"]))
+    if "選択フォルダ" in skip_df.columns and "画像ファイル名" in skip_df.columns:
+        skipped_pairs = set(zip(skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+    else:
+        skipped_pairs = set()
+    done_pairs = answered_pairs.union(skipped_pairs)
+
+    # フォルダの再選択
+    remaining_folders = []
+    for folder in folder_names:
+        folder_df = image_list_df[image_list_df["フォルダ"] == folder]
+        all_images = set(zip(folder_df["フォルダ"], folder_df["画像ファイル名"]))
+        if not all_images.issubset(done_pairs):
+            remaining_folders.append(folder)
+
+    if not remaining_folders:
+        st.success("すべてのフォルダを評価しました！")
+        st.stop()
+
+    # フォルダと画像を再初期化
+    selected_folder = random.choice(remaining_folders)
+    folder_images = image_list_df[image_list_df["フォルダ"] == selected_folder]
+    all_done = answered_pairs.union(skipped_pairs)
+    all_files = folder_images[~folder_images["画像ファイル名"].isin([f for f1, f in all_done if f1 == selected_folder])]
+    st.session_state.image_files = all_files.reset_index(drop=True)
+    st.session_state.index = 0
+    st.rerun()
 
 # ====== 現在の画像表示 ======
 row = st.session_state.image_files.iloc[st.session_state.index]
