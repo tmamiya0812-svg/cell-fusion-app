@@ -20,15 +20,15 @@ required_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ",
 skip_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "スキップ理由"]
 
 
+@st.cache_data(ttl=60)  # キャッシュを60秒保持
 def sheet_to_df_from(sheet_obj, ws_name, cols):
     try:
         ws = sheet_obj.worksheet(ws_name)
         return pd.DataFrame(ws.get_all_records())
     except gspread.exceptions.WorksheetNotFound:
-        # シートがなければ新規作成（1行目にヘッダー）
         sheet_obj.add_worksheet(title=ws_name, rows="1000", cols=str(len(cols)))
         ws = sheet_obj.worksheet(ws_name)
-        ws.append_row(cols)  # ヘッダーとして列名を追加
+        ws.append_row(cols)
         return pd.DataFrame(columns=cols)
     except Exception as e:
         st.error(f"{ws_name} の読み込みエラー: {e}")
@@ -169,6 +169,7 @@ if st.session_state.index >= len(st.session_state.image_files):
 
         existing_df = combined_df.copy()
         st.session_state.buffered_entries = []
+        st.sidebar.success("保存しました（フォルダ終了時）")
 
     # --- 次のフォルダを選ぶ ---
     answered_pairs = set(zip(combined_df["選択フォルダ"], combined_df["画像ファイル名"]))
