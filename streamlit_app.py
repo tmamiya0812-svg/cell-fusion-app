@@ -78,10 +78,15 @@ if "選択フォルダ" in skip_df.columns:
 
 image_list_df = sheet_to_df_from(image_sheet, "画像リスト", ["フォルダ", "画像ファイル名", "画像URL"])
 folder_names = sorted(image_list_df["フォルダ"].unique().tolist())
-# 評価済みフォルダ一覧（スキップログの列が存在するかをチェック）
-done_folders = set(combined_df["選択フォルダ"].unique().tolist())
-if "選択フォルダ" in skip_df.columns:
-    done_folders |= set(skip_df["選択フォルダ"].unique().tolist())
+# === フォルダごとの評価・スキップ画像数をチェックしてdone_foldersを定義 ===
+done_folders = set()
+for folder in folder_names:
+    folder_images = image_list_df[image_list_df["フォルダ"] == folder]["画像ファイル名"].tolist()
+    evaluated_images = combined_df[combined_df["選択フォルダ"] == folder]["画像ファイル名"].tolist()
+    skipped_images = skip_df[skip_df["選択フォルダ"] == folder]["画像ファイル名"].tolist()
+    all_done = set(evaluated_images + skipped_images)
+    if set(folder_images).issubset(all_done):
+        done_folders.add(folder)
 
 # 未評価フォルダのみに絞る
 remaining_folders = [f for f in folder_names if f not in done_folders]
