@@ -44,16 +44,29 @@ def df_to_sheet_to(sheet_obj, df, ws_name):
 def flush_buffer_to_sheet():
     if "buffered_entries" in st.session_state and st.session_state.buffered_entries:
         buffered_df = pd.DataFrame(st.session_state.buffered_entries)
-        combined_df = pd.concat([st.session_state.existing_df, buffered_df], ignore_index=True)
-        combined_df.drop_duplicates(subset=["回答者", "選択フォルダ", "画像ファイル名"], keep="last", inplace=True)
-        summary = combined_df.groupby(["選択フォルダ", "時間"])[["\u2460未融合", "\u2461接触", "\u2462融合中", "\u2463完全融合"]].sum().reset_index()
+
+        # 保存先の既存データを取得（更新用）
+        existing_df = st.session_state.existing_df
+
+        # 古いバッファによる上書きを防ぐため、バッファの内容で重複を上書き（新しい方を優先）
+        combined_df = pd.concat([buffered_df, existing_df], ignore_index=True)
+        combined_df.drop_duplicates(subset=["回答者", "選択フォルダ", "画像ファイル名"], keep="first", inplace=True)
+
+        # 分類件数集計
+        summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
         summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
+
+        # シートに保存
         df_to_sheet_to(log_sheet, combined_df, "今回の評価")
         df_to_sheet_to(log_sheet, summary, "分類別件数")
         df_to_sheet_to(log_sheet, st.session_state.skip_df, "スキップログ")
-        st.session_state.existing_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
+
+        # セッション更新
+        st.session_state.existing_df = combined_df
         st.session_state.buffered_entries = []
+
         st.sidebar.success("保存しました")
+
 
 USER_CREDENTIALS = {"mamiya": "a", "arai": "a", "yamazaki": "protoplast"}
 
@@ -187,6 +200,13 @@ with col3:
             
             if "buffered_entries" not in st.session_state:
                 st.session_state.buffered_entries = []
+                # 重複する既存バッファを削除してから新規追加
+            st.session_state.buffered_entries = [
+                e for e in st.session_state.buffered_entries
+                if not (e["選択フォルダ"] == selected_folder and e["画像ファイル名"] == current_file)
+            ]
+            st.session_state.buffered_entries.append(new_entry)
+
             st.session_state.buffered_entries.append(new_entry)
             # 🔽 入力値をリセット（次の画像で初期状態に戻す）
             st.session_state[f"val1_{current_file}"] = 0
