@@ -48,11 +48,7 @@ def flush_buffer_to_sheet():
 
         # 修正：時間も含めて一意に扱う
         combined_df = pd.concat([existing_df, buffered_df], ignore_index=True)
-        combined_df.drop_duplicates(
-            subset=["回答者", "選択フォルダ", "画像ファイル名", "時間"],
-            keep="last",
-            inplace=True
-        )
+       
 
         # 集計と保存処理はそのまま
         summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
