@@ -212,7 +212,7 @@ with col3:
             for i in range(1, 5):
                 k = f"val{i}_{current_file}"
                 if k in st.session_state:
-                del st.session_state[k]
+                    del st.session_state[k]
 
             # 5件で保存
             if len(st.session_state.buffered_entries) >= 5:
