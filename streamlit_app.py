@@ -143,13 +143,13 @@ st.image(current_url, use_container_width=True)
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    val_1 = st.number_input("\u2460未融合", min_value=0, max_value=1000, step=1)
+    val_1 = st.number_input("\u2460未融合", min_value=0, max_value=1000, step=1,key=f"val1_{current_file}")
 with col2:
-    val_2 = st.number_input("\u2461接触", min_value=0, max_value=1000, step=1)
+    val_2 = st.number_input("\u2461接触", min_value=0, max_value=1000, step=1,key=f"val2_{current_file}")
 with col3:
-    val_3 = st.number_input("\u2462融合中", min_value=0, max_value=1000, step=1)
+    val_3 = st.number_input("\u2462融合中", min_value=0, max_value=1000, step=1,key=f"val3_{current_file}")
 with col4:
-    val_4 = st.number_input("\u2463完全融合", min_value=0, max_value=1000, step=1)
+    val_4 = st.number_input("\u2463完全融合", min_value=0, max_value=1000, step=1,key=f"val4_{current_file}")
 
 col1, col2, col3 = st.columns(3)
 with col1:
