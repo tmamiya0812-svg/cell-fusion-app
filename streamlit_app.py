@@ -150,7 +150,7 @@ with col2:
         skip_entry = {
             "回答者": username,
             "親フォルダ": "mix",
-            "時間": re.search(r'(\\d+min)', selected_folder).group(1),
+            "時間": re.search(r'(\d+min)', selected_folder).group(1),
             "選択フォルダ": selected_folder,
             "画像ファイル名": current_file,
             "スキップ理由": "判別不能"
