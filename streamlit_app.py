@@ -208,11 +208,11 @@ with col3:
             ]
             st.session_state.buffered_entries.append(new_entry)
 
-            # 入力リセット（オプション：ここは必要なら残す）
-            st.session_state[f"val1_{current_file}"] = 0
-            st.session_state[f"val2_{current_file}"] = 0
-            st.session_state[f"val3_{current_file}"] = 0
-            st.session_state[f"val4_{current_file}"] = 0
+            # 入力リセット
+            for i in range(1, 5):
+                k = f"val{i}_{current_file}"
+                if k in st.session_state:
+                del st.session_state[k]
 
             # 5件で保存
             if len(st.session_state.buffered_entries) >= 5:
