@@ -197,24 +197,28 @@ with col3:
                 "③融合中": val_3,
                 "④完全融合": val_4
             }
-            
+            # バッファ初期化（なければ）
             if "buffered_entries" not in st.session_state:
                 st.session_state.buffered_entries = []
-                # 重複する既存バッファを削除してから新規追加
+
+            # 🔽 修正：正しいフォルダ名を参照して重複チェック
             st.session_state.buffered_entries = [
                 e for e in st.session_state.buffered_entries
-                if not (e["選択フォルダ"] == selected_folder and e["画像ファイル名"] == current_file)
+                if not (e["選択フォルダ"] == folder_for_this_image and e["画像ファイル名"] == current_file)
             ]
             st.session_state.buffered_entries.append(new_entry)
 
-            st.session_state.buffered_entries.append(new_entry)
-            # 🔽 入力値をリセット（次の画像で初期状態に戻す）
+            # 入力リセット（オプション：ここは必要なら残す）
             st.session_state[f"val1_{current_file}"] = 0
             st.session_state[f"val2_{current_file}"] = 0
             st.session_state[f"val3_{current_file}"] = 0
             st.session_state[f"val4_{current_file}"] = 0
+
+            # 5件で保存
             if len(st.session_state.buffered_entries) >= 5:
                 flush_buffer_to_sheet()
+
+            # 次へ
             st.session_state.index += 1
             st.rerun()
 
