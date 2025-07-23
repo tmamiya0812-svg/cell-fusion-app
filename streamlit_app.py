@@ -47,10 +47,10 @@ def flush_buffer_to_sheet():
         existing_df = st.session_state.existing_df
 
         # 修正：時間も含めて一意に扱う
-        combined_df = pd.concat([buffered_df, existing_df], ignore_index=True)
+        combined_df = pd.concat([existing_df, buffered_df], ignore_index=True)
         combined_df.drop_duplicates(
             subset=["回答者", "選択フォルダ", "画像ファイル名", "時間"],
-            keep="first",
+            keep="last",
             inplace=True
         )
 
