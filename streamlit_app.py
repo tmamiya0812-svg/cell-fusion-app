@@ -147,14 +147,19 @@ with col1:
 
 with col2:
     if st.button("スキップ"):
+        folder_for_this_image = row["フォルダ"]
+        time_match = re.search(r'(\d+min)', folder_for_this_image)
+        time_str = time_match.group(1) if time_match else "不明"
+
         skip_entry = {
             "回答者": username,
             "親フォルダ": "mix",
-            "時間": re.search(r'(\d+min)', selected_folder).group(1),
-            "選択フォルダ": selected_folder,
+            "時間": time_str,
+            "選択フォルダ": folder_for_this_image,
             "画像ファイル名": current_file,
             "スキップ理由": "判別不能"
         }
+
         st.session_state.skip_df = pd.concat([st.session_state.skip_df, pd.DataFrame([skip_entry])], ignore_index=True)
         st.session_state.index += 1
         st.rerun()
@@ -164,17 +169,22 @@ with col3:
         if val_1 + val_2 + val_3 + val_4 == 0:
             st.warning("少なくとも1つは分類してください")
         else:
+            folder_for_this_image = row["フォルダ"]  # image_list_dfから来てる元の情報を使う
+            time_match = re.search(r'(\d+min)', folder_for_this_image)
+            time_str = time_match.group(1) if time_match else "不明"
+
             new_entry = {
                 "回答者": username,
                 "親フォルダ": "mix",
-                "時間": re.search(r'(\d+min)', selected_folder).group(1),
-                "選択フォルダ": selected_folder,
+                "時間": time_str,
+                "選択フォルダ": folder_for_this_image,
                 "画像ファイル名": current_file,
                 "①未融合": val_1,
                 "②接触": val_2,
                 "③融合中": val_3,
                 "④完全融合": val_4
             }
+            
             if "buffered_entries" not in st.session_state:
                 st.session_state.buffered_entries = []
             st.session_state.buffered_entries.append(new_entry)
