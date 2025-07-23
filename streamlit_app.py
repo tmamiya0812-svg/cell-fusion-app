@@ -44,28 +44,29 @@ def df_to_sheet_to(sheet_obj, df, ws_name):
 def flush_buffer_to_sheet():
     if "buffered_entries" in st.session_state and st.session_state.buffered_entries:
         buffered_df = pd.DataFrame(st.session_state.buffered_entries)
-
-        # 保存先の既存データを取得（更新用）
         existing_df = st.session_state.existing_df
 
-        # 古いバッファによる上書きを防ぐため、バッファの内容で重複を上書き（新しい方を優先）
+        # 修正：時間も含めて一意に扱う
         combined_df = pd.concat([buffered_df, existing_df], ignore_index=True)
-        combined_df.drop_duplicates(subset=["回答者", "選択フォルダ", "画像ファイル名"], keep="first", inplace=True)
+        combined_df.drop_duplicates(
+            subset=["回答者", "選択フォルダ", "画像ファイル名", "時間"],
+            keep="first",
+            inplace=True
+        )
 
-        # 分類件数集計
+        # 集計と保存処理はそのまま
         summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
         summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
 
-        # シートに保存
         df_to_sheet_to(log_sheet, combined_df, "今回の評価")
         df_to_sheet_to(log_sheet, summary, "分類別件数")
         df_to_sheet_to(log_sheet, st.session_state.skip_df, "スキップログ")
 
-        # セッション更新
         st.session_state.existing_df = combined_df
         st.session_state.buffered_entries = []
 
         st.sidebar.success("保存しました")
+
 
 
 USER_CREDENTIALS = {"mamiya": "a", "arai": "a", "yamazaki": "protoplast"}
