@@ -188,6 +188,11 @@ with col3:
             if "buffered_entries" not in st.session_state:
                 st.session_state.buffered_entries = []
             st.session_state.buffered_entries.append(new_entry)
+            # 🔽 入力値をリセット（次の画像で初期状態に戻す）
+            st.session_state[f"val1_{current_file}"] = 0
+            st.session_state[f"val2_{current_file}"] = 0
+            st.session_state[f"val3_{current_file}"] = 0
+            st.session_state[f"val4_{current_file}"] = 0
             if len(st.session_state.buffered_entries) >= 5:
                 flush_buffer_to_sheet()
             st.session_state.index += 1
