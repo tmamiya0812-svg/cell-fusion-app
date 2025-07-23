@@ -44,7 +44,7 @@ def df_to_sheet_to(sheet_obj, df, ws_name):
 def flush_buffer_to_sheet():
     if "buffered_entries" in st.session_state and st.session_state.buffered_entries:
         buffered_df = pd.DataFrame(st.session_state.buffered_entries)
-        existing_df = st.session_state.existing_df
+        existing_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
 
         # 修正：時間も含めて一意に扱う
         combined_df = pd.concat([existing_df, buffered_df], ignore_index=True)
