@@ -167,7 +167,7 @@ with col3:
             new_entry = {
                 "回答者": username,
                 "親フォルダ": "mix",
-                "時間": re.search(r'(\\d+min)', selected_folder).group(1),
+                "時間": re.search(r'(\d+min)', selected_folder).group(1),
                 "選択フォルダ": selected_folder,
                 "画像ファイル名": current_file,
                 "①未融合": val_1,
