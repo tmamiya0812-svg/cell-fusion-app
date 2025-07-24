@@ -62,7 +62,7 @@ def flush_buffer_to_sheet():
         combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
         summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
         summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
-        df_to_sheet_to(log_sheet, summary, "分類別件数")
+        append_df_to_sheet(log_sheet, summary, "分類別件数")
 
         # スキップログも追記保存に変更するなら同様に
         append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
