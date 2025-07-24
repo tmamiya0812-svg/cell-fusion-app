@@ -35,33 +35,41 @@ def load_ws_data(sheet_id: str, ws_name: str, header_cols: list) -> pd.DataFrame
         return pd.DataFrame(columns=header_cols)
     return pd.DataFrame(records)
 
-def df_to_sheet_to(sheet_obj, df, ws_name):
-    ws = sheet_obj.worksheet(ws_name)
-    ws.clear()
-    if not df.empty:
-        ws.update([df.columns.tolist()] + df.values.tolist())
+
+def append_df_to_sheet(sheet_obj, df, ws_name):
+    try:
+        ws = sheet_obj.worksheet(ws_name)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sheet_obj.add_worksheet(title=ws_name, rows="1000", cols=str(len(df.columns)))
+        ws.append_row(df.columns.tolist())  # ヘッダー追加
+
+    if df.empty:
+        return
+
+    existing_rows = len(ws.get_all_values())  # ヘッダーを含む現在の行数
+    new_rows = [df.columns.tolist()] + df.values.tolist() if existing_rows == 0 else df.values.tolist()
+    ws.append_rows(new_rows, value_input_option="USER_ENTERED")
+
 
 def flush_buffer_to_sheet():
     if "buffered_entries" in st.session_state and st.session_state.buffered_entries:
         buffered_df = pd.DataFrame(st.session_state.buffered_entries)
-        existing_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
 
-        # 修正：時間も含めて一意に扱う
-        combined_df = pd.concat([existing_df, buffered_df], ignore_index=True)
-       
+        # ✅ 追記保存
+        append_df_to_sheet(log_sheet, buffered_df, "今回の評価")
 
-        # 集計と保存処理はそのまま
+        # 集計用 summary は上書きして問題ない場合のみ再利用
+        combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
         summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
         summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
-
-        df_to_sheet_to(log_sheet, combined_df, "今回の評価")
         df_to_sheet_to(log_sheet, summary, "分類別件数")
-        df_to_sheet_to(log_sheet, st.session_state.skip_df, "スキップログ")
 
-        st.session_state.existing_df = combined_df
+        # スキップログも追記保存に変更するなら同様に
+        append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
+
         st.session_state.buffered_entries = []
-
         st.sidebar.success("保存しました")
+
 
 
 
