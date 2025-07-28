@@ -134,10 +134,14 @@ if "image_files" not in st.session_state:
 
 if st.session_state.index >= len(st.session_state.image_files):
     flush_buffer_to_sheet()
+    if len(st.session_state.skip_df) > 0:
+        append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
+        st.session_state.skip_df = pd.DataFrame(columns=skip_cols)
     st.session_state.folder_index += 1
     st.session_state.pop("image_files", None)
     st.session_state.pop("index", None)
     st.rerun()
+
 
 row = st.session_state.image_files.iloc[st.session_state.index]
 current_file = row["画像ファイル名"]
@@ -220,8 +224,9 @@ with col3:
                     del st.session_state[k]
 
             # 5件で保存
-            if len(st.session_state.buffered_entries) >= 5:
-                flush_buffer_to_sheet()
+            if len(st.session_state.skip_df) >= 5:
+                append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
+                st.session_state.skip_df = pd.DataFrame(columns=skip_cols)
 
             # 次へ
             st.session_state.index += 1
