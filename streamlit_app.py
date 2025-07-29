@@ -182,18 +182,19 @@ with col2:
             "スキップ理由": "判別不能"
         }
 
-        # 🔽 skip_df に追加
+        # ✅ 今回の分だけを即時保存
+        single_skip_df = pd.DataFrame([skip_entry])
+        append_df_to_sheet(log_sheet, single_skip_df, "スキップログ")
+
+        # 🔽 skip_df にも内部キャッシュとして追加（後でフィルターに使う）
         st.session_state.skip_df = pd.concat(
-            [st.session_state.skip_df, pd.DataFrame([skip_entry])],
+            [st.session_state.skip_df, single_skip_df],
             ignore_index=True
         )
 
-        # ✅ 即時保存 & skip_df を初期化
-        append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
-        st.session_state.skip_df = pd.DataFrame(columns=skip_cols)
-
         st.session_state.index += 1
         st.rerun()
+
 
 
 
