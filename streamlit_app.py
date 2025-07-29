@@ -64,9 +64,6 @@ def flush_buffer_to_sheet():
         #summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
         #append_df_to_sheet(log_sheet, summary, "分類別件数")
 
-        # スキップログも追記保存に変更するなら同様に
-        append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
-
         st.session_state.buffered_entries = []
         st.sidebar.success("保存しました")
 
@@ -182,18 +179,16 @@ with col2:
             "スキップ理由": "判別不能"
         }
 
-        # ✅ 今回の分だけを即時保存
-        single_skip_df = pd.DataFrame([skip_entry])
-        append_df_to_sheet(log_sheet, single_skip_df, "スキップログ")
+        # ✅ 即時保存（1件だけ送る）
+        single_df = pd.DataFrame([skip_entry])
+        append_df_to_sheet(log_sheet, single_df, "スキップログ")
 
-        # 🔽 skip_df にも内部キャッシュとして追加（後でフィルターに使う）
-        st.session_state.skip_df = pd.concat(
-            [st.session_state.skip_df, single_skip_df],
-            ignore_index=True
-        )
+        # 🔄 内部skip_dfにも記録（画面遷移時の重複チェック用）
+        st.session_state.skip_df = pd.concat([st.session_state.skip_df, single_df], ignore_index=True)
 
         st.session_state.index += 1
         st.rerun()
+
 
 
 
