@@ -59,10 +59,10 @@ def flush_buffer_to_sheet():
         append_df_to_sheet(log_sheet, buffered_df, "今回の評価")
 
         # 集計用 summary は上書きして問題ない場合のみ再利用
-        combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
-        summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
-        summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
-        append_df_to_sheet(log_sheet, summary, "分類別件数")
+        #combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
+        #summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
+        #summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
+        #append_df_to_sheet(log_sheet, summary, "分類別件数")
 
         # スキップログも追記保存に変更するなら同様に
         append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
@@ -182,17 +182,19 @@ with col2:
             "スキップ理由": "判別不能"
         }
 
+        # 🔽 skip_df に追加
         st.session_state.skip_df = pd.concat(
             [st.session_state.skip_df, pd.DataFrame([skip_entry])],
             ignore_index=True
         )
 
-        # ✅ スキップボタンを押したその場で保存
+        # ✅ 即時保存 & skip_df を初期化
         append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
         st.session_state.skip_df = pd.DataFrame(columns=skip_cols)
 
         st.session_state.index += 1
         st.rerun()
+
 
 
 with col3:
