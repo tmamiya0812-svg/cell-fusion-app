@@ -182,9 +182,18 @@ with col2:
             "スキップ理由": "判別不能"
         }
 
-        st.session_state.skip_df = pd.concat([st.session_state.skip_df, pd.DataFrame([skip_entry])], ignore_index=True)
+        st.session_state.skip_df = pd.concat(
+            [st.session_state.skip_df, pd.DataFrame([skip_entry])],
+            ignore_index=True
+        )
+
+        # ✅ スキップボタンを押したその場で保存
+        append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
+        st.session_state.skip_df = pd.DataFrame(columns=skip_cols)
+
         st.session_state.index += 1
         st.rerun()
+
 
 with col3:
     if st.button("進む →"):
