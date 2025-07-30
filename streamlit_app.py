@@ -131,9 +131,9 @@ if "image_files" not in st.session_state:
 
 if st.session_state.index >= len(st.session_state.image_files):
     flush_buffer_to_sheet()
-    if len(st.session_state.skip_df) > 0:
-        append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
-        st.session_state.skip_df = pd.DataFrame(columns=skip_cols)
+    #if len(st.session_state.skip_df) > 0:
+        #append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
+        #st.session_state.skip_df = pd.DataFrame(columns=skip_cols)
     st.session_state.folder_index += 1
     st.session_state.pop("image_files", None)
     st.session_state.pop("index", None)
