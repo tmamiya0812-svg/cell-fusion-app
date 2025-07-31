@@ -70,7 +70,7 @@ def flush_buffer_to_sheet():
 
 
 
-USER_CREDENTIALS = {"mamiya": "a", "arai": "a", "yamazaki": "protoplast"}
+USER_CREDENTIALS = { "arai": "a"}
 
 st.set_page_config(page_title="融合度評価", layout="centered")
 st.title("融合度評価 - フラッシュカード")
