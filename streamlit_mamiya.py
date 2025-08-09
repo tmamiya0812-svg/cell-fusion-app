@@ -54,19 +54,11 @@ def append_df_to_sheet(sheet_obj, df, ws_name):
 
 def flush_buffer_to_sheet():
     if "buffered_entries" in st.session_state and st.session_state.buffered_entries:
-        buffered_df = pd.DataFrame(st.session_state.buffered_entries)
-
-        # ✅ 追記保存
+        buffered_df = pd.DataFrame(st.session_state.buffered_entries)[required_cols]  # 列固定
         append_df_to_sheet(log_sheet, buffered_df, "今回の評価")
-
-        # 集計用 summary は上書きして問題ない場合のみ再利用
-        #combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
-        #summary = combined_df.groupby(["選択フォルダ", "時間"])[["①未融合", "②接触", "③融合中", "④完全融合"]].sum().reset_index()
-        #summary.insert(0, "一意ID", summary["選択フォルダ"] + "_" + summary["時間"])
-        #append_df_to_sheet(log_sheet, summary, "分類別件数")
-
         st.session_state.buffered_entries = []
         st.sidebar.success("保存しました")
+
 
 
 
@@ -109,6 +101,42 @@ with st.sidebar.expander("セル使用量をチェック", expanded=False):
         st.write("\n".join(details))
     except Exception as e:
         st.error(f"セル使用量チェックでエラー: {e}")
+with st.sidebar.expander("巨大シートの最適化", expanded=False):
+    st.markdown("**スキップログ** と **今回の評価** の列数・行数を必要最小限に縮めます。")
+    cols_for_skip = skip_cols  # = ["回答者","親フォルダ","時間","選択フォルダ","画像ファイル名","スキップ理由"]
+    cols_for_eval = required_cols  # あなたの定義済み（9列）
+
+    def shrink_to_minimal(ws, keep_cols: list):
+        try:
+            # 現在の実データ行数（ヘッダー込み）
+            used_rows = len(ws.get_all_values())
+            if used_rows == 0:
+                used_rows = 1  # ヘッダーだけは確保
+
+            # 列は必要列数、行は実使用 + 100 のバッファ
+            ws.resize(rows=used_rows + 100, cols=len(keep_cols))
+
+            # ヘッダーを安全に上書き（A1に必要列名だけ）
+            ws.update('A1', [keep_cols])
+
+            st.success(f"{ws.title}: {used_rows}行, {len(keep_cols)}列 に最適化しました。")
+        except Exception as e:
+            st.error(f"{ws.title} 最適化エラー: {e}")
+
+    if st.button("スキップログを最適化（列を6に縮小）"):
+        try:
+            ws = log_sheet.worksheet("スキップログ")
+            shrink_to_minimal(ws, cols_for_skip)
+        except Exception as e:
+            st.error(f"スキップログ取得エラー: {e}")
+
+    if st.button("今回の評価を最適化（定義列数に縮小）"):
+        try:
+            ws = log_sheet.worksheet("今回の評価")
+            shrink_to_minimal(ws, cols_for_eval)
+        except Exception as e:
+            st.error(f"今回の評価取得エラー: {e}")
+
 
 combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
 st.session_state.existing_df = combined_df.copy()
@@ -127,7 +155,7 @@ if st.session_state.folder_index >= len(folder_names):
     st.stop()
 
 selected_folder = folder_names[st.session_state.folder_index]
-folder_images = image_list_df[image_list_df["フォルダ"] == selected_folder]
+folder_images = image_list_df[image_list_df["フォルダ"] == selected_folder].copy()
 
 user_df = combined_df[combined_df["回答者"] == username].copy()
 answered_pairs = set(zip(user_df["選択フォルダ"], user_df["画像ファイル名"]))
@@ -197,8 +225,9 @@ with col2:
         }
 
         # ✅ 即時保存（1件だけ送る）
-        single_df = pd.DataFrame([skip_entry])
+        single_df = pd.DataFrame([skip_entry])[skip_cols]  # 列固定
         append_df_to_sheet(log_sheet, single_df, "スキップログ")
+
 
         # 🔄 内部skip_dfにも記録（画面遷移時の重複チェック用）
         st.session_state.skip_df = pd.concat([st.session_state.skip_df, single_df], ignore_index=True)
@@ -248,9 +277,8 @@ with col3:
                     del st.session_state[k]
 
             # 5件で保存
-            if len(st.session_state.skip_df) >= 5:
-                append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
-                st.session_state.skip_df = pd.DataFrame(columns=skip_cols)
+           if "buffered_entries" in st.session_state and len(st.session_state.buffered_entries) >= 5:
+               flush_buffer_to_sheet()
 
             # 次へ
             st.session_state.index += 1
