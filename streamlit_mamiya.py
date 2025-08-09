@@ -90,7 +90,22 @@ if not st.session_state.authenticated:
             st.rerun()
         else:
             st.error("ユーザー名またはパスワードが違います")
+    with st.sidebar.expander("セル使用量をチェック", expanded=False):
+        try:
+            total_cells = 0
+            details = []
+            for ws in log_sheet.worksheets():
+                cells = ws.row_count * ws.col_count
+                total_cells += cells
+                details.append(f"{ws.title}: {ws.row_count} rows × {ws.col_count} cols = {cells:,} cells")
+            st.write("### LOG_SHEET 全体セル数:", f"{total_cells:,}")
+            st.write("\n".join(details))
+        except Exception as e:
+            st.error(f"セル使用量チェックでエラー: {e}")
+
     st.stop()
+
+
 
 username = st.session_state.username
 st.sidebar.markdown(f"**ログイン中:** `{username}`")
