@@ -90,7 +90,14 @@ if not st.session_state.authenticated:
             st.rerun()
         else:
             st.error("ユーザー名またはパスワードが違います")
-    with st.sidebar.expander("セル使用量をチェック", expanded=False):
+    st.stop()
+
+
+
+username = st.session_state.username
+st.sidebar.markdown(f"**ログイン中:** `{username}`")
+
+  with st.sidebar.expander("セル使用量をチェック", expanded=False):
         try:
             total_cells = 0
             details = []
@@ -103,12 +110,6 @@ if not st.session_state.authenticated:
         except Exception as e:
             st.error(f"セル使用量チェックでエラー: {e}")
 
-    st.stop()
-
-
-
-username = st.session_state.username
-st.sidebar.markdown(f"**ログイン中:** `{username}`")
 combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
 st.session_state.existing_df = combined_df.copy()
 st.session_state.skip_df = load_ws_data(LOG_SHEET_ID, "スキップログ", skip_cols)
