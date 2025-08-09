@@ -89,6 +89,28 @@ if not st.session_state.authenticated:
 username = st.session_state.username
 st.sidebar.markdown(f"**ログイン中:** `{username}`")
 
+@st.cache_data(ttl=300)
+def build_skip_keys():
+    try:
+        ws = log_sheet.worksheet("スキップログ")
+        vals = ws.get_all_values()
+        if not vals: 
+            return set()
+        header, data = vals[0], vals[1:]
+        df = pd.DataFrame(data, columns=header)
+        need = ["回答者","選択フォルダ","画像ファイル名"]
+        for c in need:
+            if c not in df.columns:
+                df[c] = ""
+        return set(zip(df["回答者"], df["選択フォルダ"], df["画像ファイル名"]))
+    except Exception:
+        return set()
+
+# ログイン後すぐ
+if "skip_keys" not in st.session_state:
+    st.session_state.skip_keys = build_skip_keys()
+
+
 with st.sidebar.expander("セル使用量をチェック", expanded=False):
     try:
         total_cells = 0
@@ -136,6 +158,44 @@ with st.sidebar.expander("巨大シートの最適化", expanded=False):
             shrink_to_minimal(ws, cols_for_eval)
         except Exception as e:
             st.error(f"今回の評価取得エラー: {e}")
+with st.sidebar.expander("スキップログ重複クリーニング", expanded=False):
+    st.markdown("**回答者×選択フォルダ×画像ファイル名** で重複を削除します（最後の1件を残す）。")
+    if st.button("スキップログを重複削除する"):
+        try:
+            ws = log_sheet.worksheet("スキップログ")
+            vals = ws.get_all_values()
+            if not vals:
+                st.info("スキップログが空です。")
+            else:
+                header, data = vals[0], vals[1:]
+                df = pd.DataFrame(data, columns=header)
+
+                # 想定列が欠けていても落ちないように
+                need = set(skip_cols)
+                missing = [c for c in skip_cols if c not in df.columns]
+                for c in missing: df[c] = ""
+
+                # 重複削除：最後（最新）を残す
+                df_dedup = df.drop_duplicates(subset=["回答者","選択フォルダ","画像ファイル名"], keep="last")
+
+                # 書き戻し（安全にクリア→ヘッダ→チャンク書き込み）
+                ws.clear()
+                ws.resize(rows=1, cols=len(skip_cols))
+                ws.update("A1", [skip_cols])
+
+                CHUNK = 1000
+                rows = df_dedup[skip_cols].values.tolist()
+                for i in range(0, len(rows), CHUNK):
+                    ws.append_rows(rows[i:i+CHUNK], value_input_option="USER_ENTERED")
+                st.cache_data.clear()  # build_skip_keys のキャッシュもクリア
+                st.session_state.skip_keys = build_skip_keys()
+                st.success(f"重複削除完了: {len(df)} → {len(df_dedup)} 行")
+                # キャッシュ再構築 & セット更新
+                
+
+        except Exception as e:
+            st.error(f"重複クリーニング中のエラー: {e}")
+
 
 
 combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
@@ -214,26 +274,30 @@ with col2:
         folder_for_this_image = row["フォルダ"]
         time_match = re.search(r'(\d+min)', folder_for_this_image)
         time_str = time_match.group(1) if time_match else "不明"
+        key = (username, folder_for_this_image, current_file)
 
-        skip_entry = {
-            "回答者": username,
-            "親フォルダ": "mix",
-            "時間": time_str,
-            "選択フォルダ": folder_for_this_image,
-            "画像ファイル名": current_file,
-            "スキップ理由": "判別不能"
-        }
+        # すでに存在なら追記しない
+        if key in st.session_state.skip_keys:
+            st.info("この画像は既にスキップ済みとして登録されています。")
+        else:
+            skip_entry = {
+                "回答者": username,
+                "親フォルダ": "mix",
+                "時間": time_str,
+                "選択フォルダ": folder_for_this_image,
+                "画像ファイル名": current_file,
+                "スキップ理由": "判別不能"
+            }
+            single_df = pd.DataFrame([skip_entry])[skip_cols]
+            append_df_to_sheet(log_sheet, single_df, "スキップログ")
 
-        # ✅ 即時保存（1件だけ送る）
-        single_df = pd.DataFrame([skip_entry])[skip_cols]  # 列固定
-        append_df_to_sheet(log_sheet, single_df, "スキップログ")
-
-
-        # 🔄 内部skip_dfにも記録（画面遷移時の重複チェック用）
-        st.session_state.skip_df = pd.concat([st.session_state.skip_df, single_df], ignore_index=True)
+            # ローカル状態も更新（重複判定に使う）
+            st.session_state.skip_df = pd.concat([st.session_state.skip_df, single_df], ignore_index=True)
+            st.session_state.skip_keys.add(key)
 
         st.session_state.index += 1
         st.rerun()
+
 
 
 
@@ -278,7 +342,7 @@ with col3:
 
             # 5件で保存
             if "buffered_entries" in st.session_state and len(st.session_state.buffered_entries) >= 5:
-               flush_buffer_to_sheet()
+                flush_buffer_to_sheet()
 
             # 次へ
             st.session_state.index += 1
