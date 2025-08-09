@@ -277,7 +277,7 @@ with col3:
                     del st.session_state[k]
 
             # 5件で保存
-           if "buffered_entries" in st.session_state and len(st.session_state.buffered_entries) >= 5:
+            if "buffered_entries" in st.session_state and len(st.session_state.buffered_entries) >= 5:
                flush_buffer_to_sheet()
 
             # 次へ
