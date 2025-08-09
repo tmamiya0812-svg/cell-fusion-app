@@ -97,18 +97,18 @@ if not st.session_state.authenticated:
 username = st.session_state.username
 st.sidebar.markdown(f"**ログイン中:** `{username}`")
 
-  with st.sidebar.expander("セル使用量をチェック", expanded=False):
-        try:
-            total_cells = 0
-            details = []
-            for ws in log_sheet.worksheets():
-                cells = ws.row_count * ws.col_count
-                total_cells += cells
-                details.append(f"{ws.title}: {ws.row_count} rows × {ws.col_count} cols = {cells:,} cells")
-            st.write("### LOG_SHEET 全体セル数:", f"{total_cells:,}")
-            st.write("\n".join(details))
-        except Exception as e:
-            st.error(f"セル使用量チェックでエラー: {e}")
+with st.sidebar.expander("セル使用量をチェック", expanded=False):
+    try:
+        total_cells = 0
+        details = []
+        for ws in log_sheet.worksheets():
+            cells = ws.row_count * ws.col_count
+            total_cells += cells
+            details.append(f"{ws.title}: {ws.row_count} rows × {ws.col_count} cols = {cells:,} cells")
+        st.write("### LOG_SHEET 全体セル数:", f"{total_cells:,}")
+        st.write("\n".join(details))
+    except Exception as e:
+        st.error(f"セル使用量チェックでエラー: {e}")
 
 combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
 st.session_state.existing_df = combined_df.copy()
