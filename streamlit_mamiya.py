@@ -98,6 +98,37 @@ def append_df_to_sheet(sheet_obj, df: pd.DataFrame, ws_name: str):
 def time_from_folder(folder_name: str) -> str:
     m = re.search(r'(\d+min)', folder_name)
     return m.group(1) if m else "不明"
+def compute_remaining(image_list_df, combined_df, skip_df, username):
+    """サーバ回答・スキップ・セッション回答・セッション内スキップを除いた残り枚数を計算"""
+    user_df = combined_df[combined_df["回答者"] == username].copy()
+
+    answered_server = set(zip(user_df["選択フォルダ_norm"], user_df["画像ファイル名"]))
+    skipped_server  = set(zip(skip_df["選択フォルダ_norm"],  skip_df["画像ファイル名"]))
+    answered_local  = st.session_state.get("answered_pairs_session", set())
+
+    # ★ 追加: セッション内のスキップ（まだシートを再読込していない分）も除外
+    # skip_keys は (回答者, 選択フォルダ_norm, 画像ファイル名) のタプル
+    local_skipped = set(
+        (folder_norm, img)
+        for (user, folder_norm, img) in st.session_state.get("skip_keys", set())
+        if user == username
+    )
+
+    done_pairs = answered_server.union(skipped_server).union(answered_local).union(local_skipped)
+
+    tmp = image_list_df.copy()
+    tmp["pair_norm"] = list(zip(tmp["フォルダ_norm"], tmp["画像ファイル名"]))
+    tmp["done"] = tmp["pair_norm"].isin(done_pairs)
+
+    remaining_total = int((~tmp["done"]).sum())
+    remaining_by_folder = (
+        tmp.groupby("フォルダ_norm")["done"]
+           .apply(lambda s: int((~s).sum()))
+           .to_dict()
+    )
+    return remaining_total, remaining_by_folder
+
+
 
 # =========================
 # テーブル一括読取（キャッシュ）
@@ -313,6 +344,24 @@ if st.session_state.folder_index >= len(folder_names):
     st.stop()
 
 selected_folder_norm = folder_names[st.session_state.folder_index]
+# === 残り枚数（全体 / 現在フォルダ） ===
+with st.sidebar.expander("進捗（残り枚数）", expanded=True):
+    try:
+        remaining_total, remaining_by_folder = compute_remaining(image_list_df, combined_df, skip_df, username)
+        st.metric("全体の残り", remaining_total)
+        st.metric("このフォルダの残り", remaining_by_folder.get(selected_folder_norm, 0))
+
+        # 残りが多い順に上位だけ（例：10件）を簡易表示
+        top_items = sorted(remaining_by_folder.items(), key=lambda x: x[1], reverse=True)[:10]
+        if top_items:
+            st.write("残りが多いフォルダ（上位10）")
+            for fname, rem in top_items:
+                st.write(f"- {fname}: {rem}")
+        else:
+            st.caption("未評価はありません。")
+    except Exception as e:
+        st.error(f"残り枚数の計算でエラー: {e}")
+
 # 表示は元のフォルダ列を使いつつ、選択は_normで絞る
 folder_images = image_list_df[image_list_df["フォルダ_norm"] == selected_folder_norm].copy()
 
