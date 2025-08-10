@@ -1,72 +1,111 @@
+# -*- coding: utf-8 -*-
+# Streamlit: 融合度評価（Google Sheets最適化・読み取り削減フル版）
 
-# === 必要なモジュール読み込み ===
 import streamlit as st
 import pandas as pd
 import random
 import re
+import time
 import gspread
 from google.oauth2.service_account import Credentials
 
-# === Google Sheets 設定 ===
+# =========================
+# 基本設定
+# =========================
+st.set_page_config(page_title="融合度評価", layout="centered")
+st.title("融合度評価 - フラッシュカード（最適化版）")
+
+# === Google Sheets IDs ===
 IMAGE_SHEET_ID = "1gDGW6B3Sj9piVHN5vEvQ9JlMp2BjGhdnyL32R7MdF8I"
-LOG_SHEET_ID = "17xAIAz6xIoM9eZHona-GyMMdM5zku4cRtUXCud5Rc5Y"
-scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-gc = gspread.authorize(credentials)
-image_sheet = gc.open_by_key(IMAGE_SHEET_ID)
-log_sheet = gc.open_by_key(LOG_SHEET_ID)
+LOG_SHEET_ID   = "17xAIAz6xIoM9eZHona-GyMMdM5zku4cRtUXCud5Rc5Y"
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
+# === 列定義 ===
 required_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "①未融合", "②接触", "③融合中", "④完全融合"]
-skip_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "スキップ理由"]
+skip_cols     = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "スキップ理由"]
+image_cols    = ["フォルダ", "画像ファイル名", "画像URL"]
 
-@st.cache_data(ttl=60)
-def load_ws_data(sheet_id: str, ws_name: str, header_cols: list) -> pd.DataFrame:
+# =========================
+# Google クライアント（1回作成）
+# =========================
+@st.cache_resource
+def get_clients():
+    credentials = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
     gc = gspread.authorize(credentials)
-    sheet = gc.open_by_key(sheet_id)
-    try:
-        ws = sheet.worksheet(ws_name)
-    except gspread.exceptions.WorksheetNotFound:
-        ws = sheet.add_worksheet(title=ws_name, rows="1000", cols=str(len(header_cols)))
-        ws.append_row(header_cols)
-        return pd.DataFrame(columns=header_cols)
-    records = ws.get_all_records()
-    if not records:
-        ws.clear()
-        ws.append_row(header_cols)
-        return pd.DataFrame(columns=header_cols)
-    return pd.DataFrame(records)
+    image_sheet = gc.open_by_key(IMAGE_SHEET_ID)
+    log_sheet   = gc.open_by_key(LOG_SHEET_ID)
+    return gc, image_sheet, log_sheet
 
+gc, image_sheet, log_sheet = get_clients()
 
-def append_df_to_sheet(sheet_obj, df, ws_name):
+# =========================
+# ユーティリティ
+# =========================
+def _to_df(values, header_expected):
+    """A1形式の値配列 -> DataFrame。欠損列は補完、余剰列は落とす。"""
+    if not values or len(values) == 0:
+        return pd.DataFrame(columns=header_expected)
+    header = values[0]
+    rows   = values[1:] if len(values) > 1 else []
+    df = pd.DataFrame(rows, columns=header)
+    for c in header_expected:
+        if c not in df.columns:
+            df[c] = ""
+    return df[header_expected]
+
+def batch_get_safe(sheet, ranges, retries=3, backoff=1.5):
+    """429/5xxに軽い指数バックオフで再試行（読み取り用のみ）"""
+    last_err = None
+    for i in range(retries):
+        try:
+            return sheet.batch_get(ranges)
+        except Exception as e:
+            last_err = e
+            time.sleep((backoff ** i))
+    raise last_err
+
+def ensure_ws(sheet_obj, ws_name, header_cols):
+    """ワークシート存在保証（ヘッダーのみ作成）。読み取りはしない。"""
     try:
         ws = sheet_obj.worksheet(ws_name)
     except gspread.exceptions.WorksheetNotFound:
-        ws = sheet_obj.add_worksheet(title=ws_name, rows="1000", cols=str(len(df.columns)))
-        ws.append_row(df.columns.tolist())  # ヘッダー追加
+        ws = sheet_obj.add_worksheet(title=ws_name, rows="1000", cols=str(len(header_cols)))
+        ws.update("A1", [header_cols])  # ヘッダー作成
+    return ws
 
+def append_df_to_sheet(sheet_obj, df: pd.DataFrame, ws_name: str):
+    """append-only（読まない）。"""
     if df.empty:
         return
+    ws = ensure_ws(sheet_obj, ws_name, df.columns.tolist())
+    ws.append_rows(df.values.tolist(), value_input_option="USER_ENTERED")
 
-    existing_rows = len(ws.get_all_values())  # ヘッダーを含む現在の行数
-    new_rows = [df.columns.tolist()] + df.values.tolist() if existing_rows == 0 else df.values.tolist()
-    ws.append_rows(new_rows, value_input_option="USER_ENTERED")
+def time_from_folder(folder_name: str) -> str:
+    m = re.search(r'(\d+min)', folder_name)
+    return m.group(1) if m else "不明"
 
+# =========================
+# テーブル一括読取（キャッシュ）
+# =========================
+@st.cache_data(ttl=600)
+def load_all_tables():
+    # IMAGE_SHEET: 画像リスト
+    img_vals = batch_get_safe(image_sheet, ["画像リスト!A1:C"])
+    # LOG_SHEET: 今回の評価 + スキップログ
+    log_vals = batch_get_safe(log_sheet, ["今回の評価!A1:I", "スキップログ!A1:F"])
+    img_df  = _to_df(img_vals[0] if img_vals else [], image_cols)
+    eval_df = _to_df(log_vals[0] if len(log_vals) > 0 else [], required_cols)
+    skip_df = _to_df(log_vals[1] if len(log_vals) > 1 else [], skip_cols)
+    return img_df, eval_df, skip_df
 
-def flush_buffer_to_sheet():
-    if "buffered_entries" in st.session_state and st.session_state.buffered_entries:
-        buffered_df = pd.DataFrame(st.session_state.buffered_entries)[required_cols]  # 列固定
-        append_df_to_sheet(log_sheet, buffered_df, "今回の評価")
-        st.session_state.buffered_entries = []
-        st.sidebar.success("保存しました")
+# 初回ロード（以後は手動リロードまで再読取しない）
+image_list_df, combined_df, skip_df = load_all_tables()
 
-
-
-
-
+# =========================
+# ログイン
+# =========================
 USER_CREDENTIALS = {"mamiya": "a", "arai": "a", "yamazaki": "protoplast"}
 
-st.set_page_config(page_title="融合度評価", layout="centered")
-st.title("融合度評価 - フラッシュカード")
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
@@ -84,83 +123,78 @@ if not st.session_state.authenticated:
             st.error("ユーザー名またはパスワードが違います")
     st.stop()
 
-
-
 username = st.session_state.username
 st.sidebar.markdown(f"**ログイン中:** `{username}`")
 
-@st.cache_data(ttl=300)
-def build_skip_keys():
-    try:
-        ws = log_sheet.worksheet("スキップログ")
-        vals = ws.get_all_values()
-        if not vals: 
-            return set()
-        header, data = vals[0], vals[1:]
-        df = pd.DataFrame(data, columns=header)
-        need = ["回答者","選択フォルダ","画像ファイル名"]
-        for c in need:
-            if c not in df.columns:
-                df[c] = ""
-        return set(zip(df["回答者"], df["選択フォルダ"], df["画像ファイル名"]))
-    except Exception:
-        return set()
-
-# ログイン後すぐ
+# =========================
+# セッション内メモリ（重複防止）
+# =========================
+# スキップキー（回答者×選択フォルダ×画像ファイル名）
 if "skip_keys" not in st.session_state:
-    st.session_state.skip_keys = build_skip_keys()
+    st.session_state.skip_keys = set(zip(skip_df["回答者"], skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
 
+# セッションで新規に回答済みの (選択フォルダ, 画像ファイル名) を追跡
+if "answered_pairs_session" not in st.session_state:
+    st.session_state.answered_pairs_session = set()
 
-with st.sidebar.expander("セル使用量をチェック", expanded=False):
-    try:
-        total_cells = 0
-        details = []
-        for ws in log_sheet.worksheets():
-            cells = ws.row_count * ws.col_count
-            total_cells += cells
-            details.append(f"{ws.title}: {ws.row_count} rows × {ws.col_count} cols = {cells:,} cells")
-        st.write("### LOG_SHEET 全体セル数:", f"{total_cells:,}")
-        st.write("\n".join(details))
-    except Exception as e:
-        st.error(f"セル使用量チェックでエラー: {e}")
-with st.sidebar.expander("巨大シートの最適化", expanded=False):
-    st.markdown("**スキップログ** と **今回の評価** の列数・行数を必要最小限に縮めます。")
-    cols_for_skip = skip_cols  # = ["回答者","親フォルダ","時間","選択フォルダ","画像ファイル名","スキップ理由"]
-    cols_for_eval = required_cols  # あなたの定義済み（9列）
+# バッファ
+if "buffered_entries" not in st.session_state:
+    st.session_state.buffered_entries = []
 
+# =========================
+# サイドバー：運用ツール（すべて手動発火）
+# =========================
+with st.sidebar.expander("データ更新・保守", expanded=False):
+    if st.button("シートを再読み込み"):
+        st.cache_data.clear()
+        image_list_df, combined_df, skip_df = load_all_tables()
+        # セッション内のキーも再構築
+        st.session_state.skip_keys = set(zip(skip_df["回答者"], skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+        st.success("最新データに更新しました")
+
+with st.sidebar.expander("セル使用量をチェック（押した時だけ）", expanded=False):
+    if st.button("今すぐチェックする"):
+        try:
+            total_cells = 0
+            details = []
+            for ws in log_sheet.worksheets():
+                cells = ws.row_count * ws.col_count
+                total_cells += cells
+                details.append(f"{ws.title}: {ws.row_count} rows × {ws.col_count} cols = {cells:,} cells")
+            st.write("### LOG_SHEET 全体セル数:", f"{total_cells:,}")
+            st.write("\n".join(details))
+        except Exception as e:
+            st.error(f"セル使用量チェックでエラー: {e}")
+
+with st.sidebar.expander("巨大シートの最適化（手動）", expanded=False):
     def shrink_to_minimal(ws, keep_cols: list):
         try:
-            # 現在の実データ行数（ヘッダー込み）
-            used_rows = len(ws.get_all_values())
+            used_rows = len(ws.get_all_values())  # ここは手動時のみ呼ぶ
             if used_rows == 0:
-                used_rows = 1  # ヘッダーだけは確保
-
-            # 列は必要列数、行は実使用 + 100 のバッファ
+                used_rows = 1
             ws.resize(rows=used_rows + 100, cols=len(keep_cols))
-
-            # ヘッダーを安全に上書き（A1に必要列名だけ）
             ws.update('A1', [keep_cols])
-
             st.success(f"{ws.title}: {used_rows}行, {len(keep_cols)}列 に最適化しました。")
         except Exception as e:
             st.error(f"{ws.title} 最適化エラー: {e}")
 
-    if st.button("スキップログを最適化（列を6に縮小）"):
+    if st.button("スキップログを最適化（6列）"):
         try:
             ws = log_sheet.worksheet("スキップログ")
-            shrink_to_minimal(ws, cols_for_skip)
+            shrink_to_minimal(ws, skip_cols)
         except Exception as e:
             st.error(f"スキップログ取得エラー: {e}")
 
-    if st.button("今回の評価を最適化（定義列数に縮小）"):
+    if st.button("今回の評価を最適化（定義列数）"):
         try:
             ws = log_sheet.worksheet("今回の評価")
-            shrink_to_minimal(ws, cols_for_eval)
+            shrink_to_minimal(ws, required_cols)
         except Exception as e:
             st.error(f"今回の評価取得エラー: {e}")
-with st.sidebar.expander("スキップログ重複クリーニング", expanded=False):
-    st.markdown("**回答者×選択フォルダ×画像ファイル名** で重複を削除します（最後の1件を残す）。")
-    if st.button("スキップログを重複削除する"):
+
+with st.sidebar.expander("スキップログ重複クリーニング（手動）", expanded=False):
+    st.markdown("**回答者×選択フォルダ×画像ファイル名** で重複を削除（最後の1件を残す）。")
+    if st.button("重複削除を実行"):
         try:
             ws = log_sheet.worksheet("スキップログ")
             vals = ws.get_all_values()
@@ -169,153 +203,147 @@ with st.sidebar.expander("スキップログ重複クリーニング", expanded=
             else:
                 header, data = vals[0], vals[1:]
                 df = pd.DataFrame(data, columns=header)
-
-                # 想定列が欠けていても落ちないように
-                need = set(skip_cols)
-                missing = [c for c in skip_cols if c not in df.columns]
-                for c in missing: df[c] = ""
-
-                # 重複削除：最後（最新）を残す
+                for c in skip_cols:
+                    if c not in df.columns:
+                        df[c] = ""
+                df = df[skip_cols]
                 df_dedup = df.drop_duplicates(subset=["回答者","選択フォルダ","画像ファイル名"], keep="last")
 
-                # 書き戻し（安全にクリア→ヘッダ→チャンク書き込み）
+                # 書き戻し
                 ws.clear()
                 ws.resize(rows=1, cols=len(skip_cols))
                 ws.update("A1", [skip_cols])
 
                 CHUNK = 1000
-                rows = df_dedup[skip_cols].values.tolist()
+                rows = df_dedup.values.tolist()
                 for i in range(0, len(rows), CHUNK):
                     ws.append_rows(rows[i:i+CHUNK], value_input_option="USER_ENTERED")
-                st.cache_data.clear()  # build_skip_keys のキャッシュもクリア
-                st.session_state.skip_keys = build_skip_keys()
-                st.success(f"重複削除完了: {len(df)} → {len(df_dedup)} 行")
-                # キャッシュ再構築 & セット更新
-                
 
+                # キャッシュ＆セッション更新
+                st.cache_data.clear()
+                _, _, skip_df = load_all_tables()
+                st.session_state.skip_keys = set(zip(skip_df["回答者"], skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+                st.success(f"重複削除完了: {len(df)} → {len(df_dedup)} 行")
         except Exception as e:
             st.error(f"重複クリーニング中のエラー: {e}")
 
+# =========================
+# 評価フロー構築
+# =========================
+# 画像リストが空なら停止
+if image_list_df.empty:
+    st.warning("画像リストが空です。画像リストシートを確認してください。")
+    st.stop()
 
-
-combined_df = load_ws_data(LOG_SHEET_ID, "今回の評価", required_cols)
-st.session_state.existing_df = combined_df.copy()
-st.session_state.skip_df = load_ws_data(LOG_SHEET_ID, "スキップログ", skip_cols)
-image_list_df = load_ws_data(IMAGE_SHEET_ID, "画像リスト", ["フォルダ", "画像ファイル名", "画像URL"])
-
+# フォルダ順（最初の一回だけランダム）をセッションに保存
 if "folder_order" not in st.session_state:
-    all_folders = image_list_df["フォルダ"].unique().tolist()
+    all_folders = image_list_df["フォルダ"].dropna().unique().tolist()
     random.shuffle(all_folders)
     st.session_state.folder_order = all_folders
     st.session_state.folder_index = 0
 
 folder_names = st.session_state.folder_order
 if st.session_state.folder_index >= len(folder_names):
+    # 最後にバッファ吐き出し
+    if st.session_state.buffered_entries:
+        buffered_df = pd.DataFrame(st.session_state.buffered_entries)[required_cols]
+        append_df_to_sheet(log_sheet, buffered_df, "今回の評価")
+        st.session_state.buffered_entries = []
     st.success("すべてのフォルダを評価しました！")
     st.stop()
 
 selected_folder = folder_names[st.session_state.folder_index]
 folder_images = image_list_df[image_list_df["フォルダ"] == selected_folder].copy()
 
+# 既存（サーバ）回答 + セッション中の新規回答 + スキップ で除外
 user_df = combined_df[combined_df["回答者"] == username].copy()
-answered_pairs = set(zip(user_df["選択フォルダ"], user_df["画像ファイル名"]))
-skip_df = st.session_state.skip_df
-skipped_pairs = set(zip(skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
-done_pairs = answered_pairs.union(skipped_pairs)
+answered_pairs_server = set(zip(user_df["選択フォルダ"], user_df["画像ファイル名"]))
+answered_pairs_local  = st.session_state.answered_pairs_session
+skipped_pairs_server  = set(zip(skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+done_pairs = answered_pairs_server.union(answered_pairs_local).union(skipped_pairs_server)
 
 folder_images["pair"] = list(zip(folder_images["フォルダ"], folder_images["画像ファイル名"]))
-filtered_images = folder_images[~folder_images["pair"].isin(done_pairs)].drop(columns=["pair"])
+filtered_images = folder_images[~folder_images["pair"].isin(done_pairs)].drop(columns=["pair"]).reset_index(drop=True)
 
+# 対象が空なら次フォルダへ
 if filtered_images.empty:
     st.session_state.folder_index += 1
     st.rerun()
 
+# セッションに現在フォルダの画像一覧を保持
 if "image_files" not in st.session_state:
-    st.session_state.image_files = filtered_images.reset_index(drop=True)
+    st.session_state.image_files = filtered_images
     st.session_state.index = 0
 
+# 範囲外なら次フォルダへ（バッファ吐き出しも）
 if st.session_state.index >= len(st.session_state.image_files):
-    flush_buffer_to_sheet()
-    #if len(st.session_state.skip_df) > 0:
-        #append_df_to_sheet(log_sheet, st.session_state.skip_df, "スキップログ")
-        #st.session_state.skip_df = pd.DataFrame(columns=skip_cols)
+    if st.session_state.buffered_entries:
+        buffered_df = pd.DataFrame(st.session_state.buffered_entries)[required_cols]
+        append_df_to_sheet(log_sheet, buffered_df, "今回の評価")
+        st.session_state.buffered_entries = []
     st.session_state.folder_index += 1
     st.session_state.pop("image_files", None)
     st.session_state.pop("index", None)
     st.rerun()
 
-
+# =========================
+# 1枚表示 & 入力UI
+# =========================
 row = st.session_state.image_files.iloc[st.session_state.index]
 current_file = row["画像ファイル名"]
-current_url = row["画像URL"]
+current_url  = row["画像URL"]
+folder_for_this_image = row["フォルダ"]
 
 st.progress((st.session_state.index + 1) / len(st.session_state.image_files))
 st.image(current_url, use_container_width=True)
 
 col1, col2, col3, col4 = st.columns(4)
-with col1:
-    val_1 = st.number_input("\u2460未融合", min_value=0, max_value=1000, step=1,key=f"val1_{current_file}")
-with col2:
-    val_2 = st.number_input("\u2461接触", min_value=0, max_value=1000, step=1,key=f"val2_{current_file}")
-with col3:
-    val_3 = st.number_input("\u2462融合中", min_value=0, max_value=1000, step=1,key=f"val3_{current_file}")
-with col4:
-    val_4 = st.number_input("\u2463完全融合", min_value=0, max_value=1000, step=1,key=f"val4_{current_file}")
+val_1 = col1.number_input("\u2460未融合", min_value=0, max_value=1000, step=1, key=f"val1_{current_file}")
+val_2 = col2.number_input("\u2461接触",   min_value=0, max_value=1000, step=1, key=f"val2_{current_file}")
+val_3 = col3.number_input("\u2462融合中", min_value=0, max_value=1000, step=1, key=f"val3_{current_file}")
+val_4 = col4.number_input("\u2463完全融合", min_value=0, max_value=1000, step=1, key=f"val4_{current_file}")
 
-col1, col2, col3 = st.columns(3)
-with col1:
+colA, colB, colC = st.columns(3)
+
+# 戻る
+with colA:
     if st.button("← 戻る"):
         if st.session_state.index > 0:
             st.session_state.index -= 1
             st.rerun()
 
-with col2:
+# スキップ
+with colB:
     if st.button("スキップ"):
-        folder_for_this_image = row["フォルダ"]
-        time_match = re.search(r'(\d+min)', folder_for_this_image)
-        time_str = time_match.group(1) if time_match else "不明"
         key = (username, folder_for_this_image, current_file)
-
-        # すでに存在なら追記しない
         if key in st.session_state.skip_keys:
-            st.info("この画像は既にスキップ済みとして登録されています。")
+            st.info("この画像は既にスキップ済みです。")
         else:
             skip_entry = {
                 "回答者": username,
                 "親フォルダ": "mix",
-                "時間": time_str,
+                "時間": time_from_folder(folder_for_this_image),
                 "選択フォルダ": folder_for_this_image,
                 "画像ファイル名": current_file,
                 "スキップ理由": "判別不能"
             }
             single_df = pd.DataFrame([skip_entry])[skip_cols]
             append_df_to_sheet(log_sheet, single_df, "スキップログ")
-
-            # ローカル状態も更新（重複判定に使う）
-            st.session_state.skip_df = pd.concat([st.session_state.skip_df, single_df], ignore_index=True)
+            # ローカル状態更新（再読取しない）
             st.session_state.skip_keys.add(key)
-
         st.session_state.index += 1
         st.rerun()
 
-
-
-
-
-
-with col3:
+# 進む
+with colC:
     if st.button("進む →"):
         if val_1 + val_2 + val_3 + val_4 == 0:
             st.warning("少なくとも1つは分類してください")
         else:
-            folder_for_this_image = row["フォルダ"]  # image_list_dfから来てる元の情報を使う
-            time_match = re.search(r'(\d+min)', folder_for_this_image)
-            time_str = time_match.group(1) if time_match else "不明"
-
             new_entry = {
                 "回答者": username,
                 "親フォルダ": "mix",
-                "時間": time_str,
+                "時間": time_from_folder(folder_for_this_image),
                 "選択フォルダ": folder_for_this_image,
                 "画像ファイル名": current_file,
                 "①未融合": val_1,
@@ -323,16 +351,15 @@ with col3:
                 "③融合中": val_3,
                 "④完全融合": val_4
             }
-            # バッファ初期化（なければ）
-            if "buffered_entries" not in st.session_state:
-                st.session_state.buffered_entries = []
-
-            # 🔽 修正：正しいフォルダ名を参照して重複チェック
+            # 同一画像の重複をバッファ内で除去してから追加
             st.session_state.buffered_entries = [
                 e for e in st.session_state.buffered_entries
                 if not (e["選択フォルダ"] == folder_for_this_image and e["画像ファイル名"] == current_file)
             ]
             st.session_state.buffered_entries.append(new_entry)
+
+            # セッション内回答セットも更新（重複判定用）
+            st.session_state.answered_pairs_session.add((folder_for_this_image, current_file))
 
             # 入力リセット
             for i in range(1, 5):
@@ -340,14 +367,22 @@ with col3:
                 if k in st.session_state:
                     del st.session_state[k]
 
-            # 5件で保存
-            if "buffered_entries" in st.session_state and len(st.session_state.buffered_entries) >= 5:
-                flush_buffer_to_sheet()
+            # 10件で保存（書込み回数を抑制）
+            if len(st.session_state.buffered_entries) >= 10:
+                buffered_df = pd.DataFrame(st.session_state.buffered_entries)[required_cols]
+                append_df_to_sheet(log_sheet, buffered_df, "今回の評価")
+                st.session_state.buffered_entries = []
+                st.sidebar.success("保存しました（append-only）")
 
-            # 次へ
             st.session_state.index += 1
             st.rerun()
 
+# 途中保存
 if st.sidebar.button("途中保存"):
-    flush_buffer_to_sheet()
-    st.stop()
+    if st.session_state.buffered_entries:
+        buffered_df = pd.DataFrame(st.session_state.buffered_entries)[required_cols]
+        append_df_to_sheet(log_sheet, buffered_df, "今回の評価")
+        st.session_state.buffered_entries = []
+        st.success("途中保存しました（append-only）")
+    else:
+        st.info("保存対象はありません。")
