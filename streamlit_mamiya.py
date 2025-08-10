@@ -13,7 +13,7 @@ from google.oauth2.service_account import Credentials
 # 基本設定
 # =========================
 st.set_page_config(page_title="融合度評価", layout="centered")
-st.title("融合度評価 - フラッシュカード（最適化版）")
+st.title("融合度評価")
 
 # === Google Sheets IDs ===
 IMAGE_SHEET_ID = "1gDGW6B3Sj9piVHN5vEvQ9JlMp2BjGhdnyL32R7MdF8I"
@@ -54,15 +54,19 @@ def _to_df(values, header_expected):
     return df[header_expected]
 
 def batch_get_safe(sheet, ranges, retries=3, backoff=1.5):
-    """429/5xxに軽い指数バックオフで再試行（読み取り用のみ）"""
+    """values_batch_get を使った一括取得（429/5xxは軽い指数バックオフ）"""
     last_err = None
     for i in range(retries):
         try:
-            return sheet.batch_get(ranges)
+            resp = sheet.values_batch_get(ranges=ranges)
+            value_ranges = resp.get("valueRanges", [])
+            # gspread は dict を返す。各要素の "values" を取り出して2次元配列のリストに変換
+            return [vr.get("values", []) for vr in value_ranges]
         except Exception as e:
             last_err = e
             time.sleep((backoff ** i))
     raise last_err
+
 
 def ensure_ws(sheet_obj, ws_name, header_cols):
     """ワークシート存在保証（ヘッダーのみ作成）。読み取りはしない。"""
