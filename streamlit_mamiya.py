@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Streamlit: 融合度評価（Google Sheets最適化・読み取り削減フル版）
+# Streamlit: 融合度評価（Google Sheets最適化・読み取り削減・正規化フル版）
 
 import streamlit as st
 import pandas as pd
@@ -24,6 +24,19 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapi
 required_cols = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "①未融合", "②接触", "③融合中", "④完全融合"]
 skip_cols     = ["回答者", "親フォルダ", "時間", "選択フォルダ", "画像ファイル名", "スキップ理由"]
 image_cols    = ["フォルダ", "画像ファイル名", "画像URL"]
+
+# === 正規化設定（必要なら接頭辞を追加） ===
+STRIP_PREFIXES = ("homogeneous_mix/",)
+
+def norm_folder(s: str) -> str:
+    """選択フォルダの表記ゆれを正規化（接頭辞除去・区切り統一・前後空白除去）"""
+    if not isinstance(s, str):
+        return s
+    s = s.replace("\\", "/").strip()
+    for p in STRIP_PREFIXES:
+        if s.startswith(p):
+            s = s[len(p):]
+    return s
 
 # =========================
 # Google クライアント（1回作成）
@@ -60,13 +73,11 @@ def batch_get_safe(sheet, ranges, retries=3, backoff=1.5):
         try:
             resp = sheet.values_batch_get(ranges=ranges)
             value_ranges = resp.get("valueRanges", [])
-            # gspread は dict を返す。各要素の "values" を取り出して2次元配列のリストに変換
             return [vr.get("values", []) for vr in value_ranges]
         except Exception as e:
             last_err = e
             time.sleep((backoff ** i))
     raise last_err
-
 
 def ensure_ws(sheet_obj, ws_name, header_cols):
     """ワークシート存在保証（ヘッダーのみ作成）。読み取りはしない。"""
@@ -100,6 +111,11 @@ def load_all_tables():
     img_df  = _to_df(img_vals[0] if img_vals else [], image_cols)
     eval_df = _to_df(log_vals[0] if len(log_vals) > 0 else [], required_cols)
     skip_df = _to_df(log_vals[1] if len(log_vals) > 1 else [], skip_cols)
+
+    # ★ 正規化列を付与
+    img_df["フォルダ_norm"] = img_df["フォルダ"].map(norm_folder)
+    eval_df["選択フォルダ_norm"] = eval_df["選択フォルダ"].map(norm_folder)
+    skip_df["選択フォルダ_norm"] = skip_df["選択フォルダ"].map(norm_folder)
     return img_df, eval_df, skip_df
 
 # 初回ロード（以後は手動リロードまで再読取しない）
@@ -133,11 +149,11 @@ st.sidebar.markdown(f"**ログイン中:** `{username}`")
 # =========================
 # セッション内メモリ（重複防止）
 # =========================
-# スキップキー（回答者×選択フォルダ×画像ファイル名）
+# スキップキー（回答者×選択フォルダ_norm×画像ファイル名）
 if "skip_keys" not in st.session_state:
-    st.session_state.skip_keys = set(zip(skip_df["回答者"], skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+    st.session_state.skip_keys = set(zip(skip_df["回答者"], skip_df["選択フォルダ_norm"], skip_df["画像ファイル名"]))
 
-# セッションで新規に回答済みの (選択フォルダ, 画像ファイル名) を追跡
+# セッションで新規に回答済みの (選択フォルダ_norm, 画像ファイル名) を追跡
 if "answered_pairs_session" not in st.session_state:
     st.session_state.answered_pairs_session = set()
 
@@ -146,14 +162,14 @@ if "buffered_entries" not in st.session_state:
     st.session_state.buffered_entries = []
 
 # =========================
-# サイドバー：運用ツール（すべて手動発火）
+# サイドバー：運用ツール（手動発火）
 # =========================
 with st.sidebar.expander("データ更新・保守", expanded=False):
     if st.button("シートを再読み込み"):
         st.cache_data.clear()
         image_list_df, combined_df, skip_df = load_all_tables()
-        # セッション内のキーも再構築
-        st.session_state.skip_keys = set(zip(skip_df["回答者"], skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+        # セッション内キー再構築（正規化版）
+        st.session_state.skip_keys = set(zip(skip_df["回答者"], skip_df["選択フォルダ_norm"], skip_df["画像ファイル名"]))
         st.success("最新データに更新しました")
 
 with st.sidebar.expander("セル使用量をチェック（押した時だけ）", expanded=False):
@@ -197,7 +213,7 @@ with st.sidebar.expander("巨大シートの最適化（手動）", expanded=Fal
             st.error(f"今回の評価取得エラー: {e}")
 
 with st.sidebar.expander("スキップログ重複クリーニング（手動）", expanded=False):
-    st.markdown("**回答者×選択フォルダ×画像ファイル名** で重複を削除（最後の1件を残す）。")
+    st.markdown("**回答者×選択フォルダ×画像ファイル名（選択フォルダは正規化）** で重複削除（最後の1件を残す）。")
     if st.button("重複削除を実行"):
         try:
             ws = log_sheet.worksheet("スキップログ")
@@ -211,13 +227,16 @@ with st.sidebar.expander("スキップログ重複クリーニング（手動）
                     if c not in df.columns:
                         df[c] = ""
                 df = df[skip_cols]
-                df_dedup = df.drop_duplicates(subset=["回答者","選択フォルダ","画像ファイル名"], keep="last")
+                # 正規化キーを追加
+                df["選択フォルダ_norm"] = df["選択フォルダ"].map(norm_folder)
+                df_dedup = df.drop_duplicates(subset=["回答者","選択フォルダ_norm","画像ファイル名"], keep="last").copy()
+                # 書き戻しは正規化名で統一
+                df_dedup["選択フォルダ"] = df_dedup["選択フォルダ_norm"]
+                df_dedup = df_dedup[skip_cols]
 
-                # 書き戻し
                 ws.clear()
                 ws.resize(rows=1, cols=len(skip_cols))
                 ws.update("A1", [skip_cols])
-
                 CHUNK = 1000
                 rows = df_dedup.values.tolist()
                 for i in range(0, len(rows), CHUNK):
@@ -226,8 +245,45 @@ with st.sidebar.expander("スキップログ重複クリーニング（手動）
                 # キャッシュ＆セッション更新
                 st.cache_data.clear()
                 _, _, skip_df = load_all_tables()
-                st.session_state.skip_keys = set(zip(skip_df["回答者"], skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
-                st.success(f"重複削除完了: {len(df)} → {len(df_dedup)} 行")
+                st.session_state.skip_keys = set(zip(skip_df["回答者"], skip_df["選択フォルダ_norm"], skip_df["画像ファイル名"]))
+                st.success(f"重複削除（正規化）完了: {len(df)} → {len(df_dedup)} 行")
+        except Exception as e:
+            st.error(f"重複クリーニング中のエラー: {e}")
+
+with st.sidebar.expander("今回の評価 重複クリーニング（手動）", expanded=False):
+    st.markdown("**回答者×選択フォルダ×画像ファイル名（選択フォルダは正規化）** で重複削除（最後の1件を残す）。")
+    if st.button("今回の評価の重複削除を実行"):
+        try:
+            ws = log_sheet.worksheet("今回の評価")
+            vals = ws.get_all_values()
+            if not vals:
+                st.info("今回の評価が空です。")
+            else:
+                header, data = vals[0], vals[1:]
+                df = pd.DataFrame(data, columns=header)
+                for c in required_cols:
+                    if c not in df.columns:
+                        df[c] = ""
+                df = df[required_cols]
+                # 正規化キーを追加
+                df["選択フォルダ_norm"] = df["選択フォルダ"].map(norm_folder)
+                df_dedup = df.drop_duplicates(subset=["回答者","選択フォルダ_norm","画像ファイル名"], keep="last").copy()
+                # 書き戻しは正規化名で統一
+                df_dedup["選択フォルダ"] = df_dedup["選択フォルダ_norm"]
+                df_dedup = df_dedup[required_cols]
+
+                ws.clear()
+                ws.resize(rows=1, cols=len(required_cols))
+                ws.update("A1", [required_cols])
+                CHUNK = 1000
+                rows = df_dedup.values.tolist()
+                for i in range(0, len(rows), CHUNK):
+                    ws.append_rows(rows[i:i+CHUNK], value_input_option="USER_ENTERED")
+
+                # 再読込
+                st.cache_data.clear()
+                image_list_df, combined_df, skip_df = load_all_tables()
+                st.success(f"重複削除（正規化）完了: {len(df)} → {len(df_dedup)} 行")
         except Exception as e:
             st.error(f"重複クリーニング中のエラー: {e}")
 
@@ -239,9 +295,9 @@ if image_list_df.empty:
     st.warning("画像リストが空です。画像リストシートを確認してください。")
     st.stop()
 
-# フォルダ順（最初の一回だけランダム）をセッションに保存
+# フォルダ順（最初の一回だけランダム）→ 正規化名で管理
 if "folder_order" not in st.session_state:
-    all_folders = image_list_df["フォルダ"].dropna().unique().tolist()
+    all_folders = image_list_df["フォルダ_norm"].dropna().unique().tolist()
     random.shuffle(all_folders)
     st.session_state.folder_order = all_folders
     st.session_state.folder_index = 0
@@ -256,18 +312,20 @@ if st.session_state.folder_index >= len(folder_names):
     st.success("すべてのフォルダを評価しました！")
     st.stop()
 
-selected_folder = folder_names[st.session_state.folder_index]
-folder_images = image_list_df[image_list_df["フォルダ"] == selected_folder].copy()
+selected_folder_norm = folder_names[st.session_state.folder_index]
+# 表示は元のフォルダ列を使いつつ、選択は_normで絞る
+folder_images = image_list_df[image_list_df["フォルダ_norm"] == selected_folder_norm].copy()
 
-# 既存（サーバ）回答 + セッション中の新規回答 + スキップ で除外
+# 既存（サーバ）回答 + セッション中の新規回答 + スキップ を正規化キーで除外
 user_df = combined_df[combined_df["回答者"] == username].copy()
-answered_pairs_server = set(zip(user_df["選択フォルダ"], user_df["画像ファイル名"]))
+answered_pairs_server = set(zip(user_df["選択フォルダ_norm"], user_df["画像ファイル名"]))
 answered_pairs_local  = st.session_state.answered_pairs_session
-skipped_pairs_server  = set(zip(skip_df["選択フォルダ"], skip_df["画像ファイル名"]))
+skipped_pairs_server  = set(zip(skip_df["選択フォルダ_norm"], skip_df["画像ファイル名"]))
 done_pairs = answered_pairs_server.union(answered_pairs_local).union(skipped_pairs_server)
 
-folder_images["pair"] = list(zip(folder_images["フォルダ"], folder_images["画像ファイル名"]))
-filtered_images = folder_images[~folder_images["pair"].isin(done_pairs)].drop(columns=["pair"]).reset_index(drop=True)
+# 正規化キーで判定
+folder_images["pair_norm"] = list(zip(folder_images["フォルダ_norm"], folder_images["画像ファイル名"]))
+filtered_images = folder_images[~folder_images["pair_norm"].isin(done_pairs)].drop(columns=["pair_norm"]).reset_index(drop=True)
 
 # 対象が空なら次フォルダへ
 if filtered_images.empty:
@@ -296,7 +354,8 @@ if st.session_state.index >= len(st.session_state.image_files):
 row = st.session_state.image_files.iloc[st.session_state.index]
 current_file = row["画像ファイル名"]
 current_url  = row["画像URL"]
-folder_for_this_image = row["フォルダ"]
+folder_for_this_image = row["フォルダ"]          # 表示・時間抽出用（元名）
+folder_norm_this      = row["フォルダ_norm"]     # 判定・保存用（正規化名）
 
 st.progress((st.session_state.index + 1) / len(st.session_state.image_files))
 st.image(current_url, use_container_width=True)
@@ -319,7 +378,7 @@ with colA:
 # スキップ
 with colB:
     if st.button("スキップ"):
-        key = (username, folder_for_this_image, current_file)
+        key = (username, folder_norm_this, current_file)  # 正規化キーで管理
         if key in st.session_state.skip_keys:
             st.info("この画像は既にスキップ済みです。")
         else:
@@ -327,7 +386,7 @@ with colB:
                 "回答者": username,
                 "親フォルダ": "mix",
                 "時間": time_from_folder(folder_for_this_image),
-                "選択フォルダ": folder_for_this_image,
+                "選択フォルダ": folder_norm_this,   # ★正規化名で保存
                 "画像ファイル名": current_file,
                 "スキップ理由": "判別不能"
             }
@@ -347,23 +406,23 @@ with colC:
             new_entry = {
                 "回答者": username,
                 "親フォルダ": "mix",
-                "時間": time_from_folder(folder_for_this_image),
-                "選択フォルダ": folder_for_this_image,
+                "時間": time_from_folder(folder_for_this_image),  # 元名から抽出でOK
+                "選択フォルダ": folder_norm_this,                 # ★正規化名で保存
                 "画像ファイル名": current_file,
                 "①未融合": val_1,
                 "②接触": val_2,
                 "③融合中": val_3,
                 "④完全融合": val_4
             }
-            # 同一画像の重複をバッファ内で除去してから追加
+            # 同一画像の重複をバッファ内で除去してから追加（正規化キーで判定）
             st.session_state.buffered_entries = [
                 e for e in st.session_state.buffered_entries
-                if not (e["選択フォルダ"] == folder_for_this_image and e["画像ファイル名"] == current_file)
+                if not (e["選択フォルダ"] == folder_norm_this and e["画像ファイル名"] == current_file)
             ]
             st.session_state.buffered_entries.append(new_entry)
 
-            # セッション内回答セットも更新（重複判定用）
-            st.session_state.answered_pairs_session.add((folder_for_this_image, current_file))
+            # セッション内回答セットも更新（正規化名で）
+            st.session_state.answered_pairs_session.add((folder_norm_this, current_file))
 
             # 入力リセット
             for i in range(1, 5):
